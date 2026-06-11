@@ -3,7 +3,7 @@
 // use egui::util::fixed_cache::FixedCache;
 use egui::{
     Context, DragValue, Id, Painter, Popup, PopupCloseBehavior, Response, Sense, Ui, Widget as _,
-    WidgetInfo, WidgetType, epaint, lerp, remap_clamp,
+    WidgetInfo, WidgetType, epaint, lerp, remap_clamp, TextureHandle, Pos2
 };
 use epaint::{
     Mesh, Rect, Shape, Stroke, StrokeKind, Vec2,
@@ -255,6 +255,112 @@ fn color_slider_2d(
     response
 }
 
+/// CPU-rasterized 2D color slider using egui textures.
+fn color_slider_2d_grid(
+    ui: &mut Ui,
+    x_value: &mut f32,
+    y_value: &mut f32,
+    color_at: impl Fn(f32, f32) -> Color32,
+) -> Response {
+    let desired_size = Vec2::splat(ui.spacing().slider_width);
+    let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
+
+    // Handle interaction
+    if let Some(mpos) = response.interact_pointer_pos() {
+        *x_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
+        *y_value = remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
+    }
+
+    if ui.is_rect_visible(rect) {
+        let size = rect.size();
+
+        // ----------------------------
+        // 1. Retrieve or create texture
+        // ----------------------------
+        let tex_id = egui::Id::new("color_slider_tex");
+
+        let mut tex = ui.data(|d| {
+            d.get_temp::<Option<egui::TextureHandle>>(tex_id)
+        }).unwrap_or(None);
+
+        let pixels_w = size.x as usize;
+        let pixels_h = size.y as usize;
+
+        let rebuild = tex.is_none()
+            || tex.as_ref().unwrap().size_vec2() != size;
+
+        if rebuild {
+            let mut pixels = Vec::with_capacity(pixels_w * pixels_h * 4);
+
+            for y in 0..pixels_h {
+                let yt = y as f32 / (pixels_h as f32 - 1.0);
+
+                for x in 0..pixels_w {
+                    let xt = x as f32 / (pixels_w as f32 - 1.0);
+
+                    let color = color_at(xt, yt);
+
+                    pixels.push(color.r());
+                    pixels.push(color.g());
+                    pixels.push(color.b());
+                    pixels.push(color.a());
+                }
+            }
+
+            let image = egui::ColorImage::from_rgba_unmultiplied(
+                [pixels_w, pixels_h],
+                &pixels,
+            );
+
+            if tex.is_none() {
+                tex = Some(ui.ctx().load_texture(
+                    "color_slider_2d",
+                    image,
+                    egui::TextureOptions::LINEAR,
+                ));
+            }
+
+            ui.data_mut(|d| {
+                d.insert_temp(tex_id, tex.clone());
+            });
+        }
+
+        let tex = tex.as_ref().unwrap();
+
+        // ----------------------------
+        // 2. Paint image
+        // ----------------------------
+        ui.painter()
+            .image(tex.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+
+        // ----------------------------
+        // 3. Outline
+        // ----------------------------
+        let visuals = ui.style().interact(&response);
+        ui.painter()
+            .rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
+
+        // ----------------------------
+        // 4. Handle indicator
+        // ----------------------------
+        let x = lerp(rect.left()..=rect.right(), *x_value);
+        let y = lerp(rect.bottom()..=rect.top(), *y_value);
+        let picked_color = color_at(*x_value, *y_value);
+
+        ui.painter().circle(
+            Pos2::new(x, y),
+            rect.width() / 12.0,
+            picked_color,
+            egui::Stroke::new(
+                visuals.fg_stroke.width,
+                contrast_color(picked_color),
+            ),
+        );
+    }
+
+    response
+}
+
 /// We use a negative alpha for additive colors within this file (a bit ironic).
 ///
 /// We use alpha=0 to mean "transparent".
@@ -373,7 +479,8 @@ fn color_picker_hsvag_2d(ui: &mut Ui, hsvag: &mut HsvaGamma, alpha: Alpha) {
         color_slider_1d(ui, v, |v| HsvaGamma { v, ..opaque }.into()).on_hover_text("Value");
     }
 
-    color_slider_2d(ui, s, v, |s, v| HsvaGamma { s, v, ..opaque }.into());
+    // color_slider_2d(ui, s, v, |s, v| HsvaGamma { s, v, ..opaque }.into());
+    color_slider_2d_grid(ui, s, v, |s, v| HsvaGamma { s, v, ..opaque }.into());
 
     color_slider_1d(ui, h, |h| {
         HsvaGamma {
