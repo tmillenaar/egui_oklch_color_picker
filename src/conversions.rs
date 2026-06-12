@@ -15,6 +15,14 @@ pub struct Oklch {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+pub struct Oklcha {
+    pub l: f32,
+    pub c: f32,
+    pub h: f32,
+    pub a: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct LinearSrgb {
     pub r: f32,
     pub g: f32,
@@ -108,78 +116,27 @@ pub fn oklch_to_oklab(c: Oklch) -> Oklab {
     }
 }
 
-impl Srgb {
-    pub fn hex(self) -> u32 {
-        let (r, g, b) = self.components();
-        (r as u32) << 16 | (g as u32) << 8 | b as u32
-    }
+pub fn try_oklch_to_linear_srgb(c: Oklch) -> Option<LinearSrgb> {
+    let rgb = oklab_to_linear_srgb(oklch_to_oklab(c));
 
-    pub fn components(self) -> (u8, u8, u8) {
-        let scale = |n: f32| (n.clamp(0.0, 1.0) * 255.0).round() as u8;
-
-        (scale(self.r), scale(self.g), scale(self.b))
+    if !(0.0..=1.0).contains(&rgb.r)
+        || !(0.0..=1.0).contains(&rgb.g)
+        || !(0.0..=1.0).contains(&rgb.b)
+    {
+        None
+    } else {
+        Some(rgb)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub fn try_oklch_to_color32(c: Oklch) -> Option<crate::Color32> {
+    let linear = try_oklch_to_linear_srgb(c)?;
 
-    #[test]
-    fn hex() {
-        assert_eq!(
-            Srgb {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0
-            }
-            .hex(),
-            0x000000
-        );
-        assert_eq!(
-            Srgb {
-                r: 1.0,
-                g: 0.0,
-                b: 0.0
-            }
-            .hex(),
-            0xFF0000
-        );
-        assert_eq!(
-            Srgb {
-                r: 0.0,
-                g: 1.0,
-                b: 0.0
-            }
-            .hex(),
-            0x00FF00
-        );
-        assert_eq!(
-            Srgb {
-                r: 0.0,
-                g: 0.0,
-                b: 1.0
-            }
-            .hex(),
-            0x0000FF
-        );
-        assert_eq!(
-            Srgb {
-                r: 1.0,
-                g: 1.0,
-                b: 1.0
-            }
-            .hex(),
-            0xFFFFFF
-        );
-        assert_eq!(
-            Srgb {
-                r: 0.5,
-                g: 0.3,
-                b: 0.8
-            }
-            .hex(),
-            0x804DCC
-        );
-    }
+    let srgb = linear_srgb_to_srgb(linear);
+
+    Some(crate::Color32::from_rgb(
+        (srgb.r * 255.0).round() as u8,
+        (srgb.g * 255.0).round() as u8,
+        (srgb.b * 255.0).round() as u8,
+    ))
 }

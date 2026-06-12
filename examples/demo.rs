@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui_oklab::{Alpha, color_edit_button_srgba};
+use egui_oklab::{Alpha, color_edit_button_oklcha};
 
 struct MyApp {
     color: egui::Color32,
@@ -20,15 +20,13 @@ impl eframe::App for MyApp {
 
             ui.label("Pick a color:");
 
-
-            color_edit_button_srgba(ui, &mut self.color, Alpha::OnlyBlend);
+            color_edit_button_oklcha(ui, &mut self.color);
 
             ui.separator();
 
             ui.label("Preview:");
 
-            let (rect, _) =
-                ui.allocate_exact_size(egui::vec2(200.0, 100.0), egui::Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(200.0, 100.0), egui::Sense::hover());
 
             ui.painter().rect_filled(rect, 5.0, self.color);
         });
