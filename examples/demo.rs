@@ -3,12 +3,14 @@ use egui_oklab::{Alpha, color_edit_button_oklcha};
 
 struct MyApp {
     color: egui::Color32,
+    color_reference: egui::Color32,
 }
 
 impl Default for MyApp {
     fn default() -> Self {
         Self {
             color: egui::Color32::from_rgb(128, 128, 255),
+            color_reference: egui::Color32::from_rgb(128, 128, 255),
         }
     }
 }
@@ -21,6 +23,10 @@ impl eframe::App for MyApp {
             ui.label("Pick a color:");
 
             color_edit_button_oklcha(ui, &mut self.color);
+
+            let mut hsva = self.color_reference.into();
+            ui.color_edit_button_hsva(&mut hsva);
+            self.color_reference = hsva.into();
 
             ui.separator();
 

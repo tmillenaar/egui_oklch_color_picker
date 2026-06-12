@@ -673,11 +673,10 @@ fn oklch_to_color32(c: Oklch) -> Color32 {
 //         }
 //     }
 // }
+//
 
 fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
     let current_color_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
-    show_srgba_unmultiplied(ui, oklch_to_color32(*lch).to_array(), current_color_size)
-        .on_hover_text("Selected color");
 
     // let Oklch { l, c, h } = *lch;
 
@@ -698,47 +697,94 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
     let c = state.c * 0.325;
     let h = state.h * std::f32::consts::TAU;
 
+    ui.horizontal(|ui| {
+        show_srgba_unmultiplied(ui, oklch_to_color32(*lch).to_array(), current_color_size)
+            .on_hover_text("Selected color");
+        // if ui
+        //     .button("📋")
+        //     .on_hover_text("Click to copy color values")
+        //     .clicked()
+        // {
+        //     let srgb: Srgb =
+        //         linear_srgb_to_srgb(oklab_to_linear_srgb(oklch_to_oklab(state.previous_color)));
+        //     ui.copy_text(format!("{srgb.r}, {srgb.g}, {srgb.b}"));
+        // };
+    });
+
     // --- Lightness slider (0..1) ---
-    color_slider_1d_grid(
-        ui,
-        &mut state.l,
-        lch.l,
-        |l_mut| try_oklch_to_color32(Oklch { l: l_mut, c, h }),
-        &"lightness",
-    )
-    .on_hover_text("Lightness");
+    ui.horizontal(|ui| {
+        color_slider_1d_grid(
+            ui,
+            &mut state.l,
+            lch.l,
+            |l_mut| try_oklch_to_color32(Oklch { l: l_mut, c, h }),
+            &"lightness",
+        )
+        .on_hover_text("Lightness");
+        DragValue::new(&mut state.l)
+            .prefix("L: ")
+            .speed(0.003)
+            .range(0.0..=1.0)
+            .custom_formatter(|n, _| format!("{n:.03}"))
+            .ui(ui)
+            .on_hover_text("Lightness");
+    });
 
     // --- Chroma slider ---
-    color_slider_1d_grid(
-        ui,
-        &mut state.c,
-        lch.c / 0.325,
-        |c_mut| {
-            try_oklch_to_color32(Oklch {
-                l,
-                c: c_mut * 0.325,
-                h,
-            })
-        },
-        &"chroma",
-    )
-    .on_hover_text("Chroma");
+    ui.horizontal(|ui| {
+        color_slider_1d_grid(
+            ui,
+            &mut state.c,
+            lch.c / 0.325,
+            |c_mut| {
+                try_oklch_to_color32(Oklch {
+                    l,
+                    c: c_mut * 0.325,
+                    h,
+                })
+            },
+            &"chroma",
+        )
+        .on_hover_text("Chroma");
+        let mut chroma_val = state.c * 0.325;
+        DragValue::new(&mut chroma_val)
+            .prefix("C: ")
+            .speed(0.001)
+            .range(0.0..=0.325)
+            .custom_formatter(|n, _| format!("{n:.03}"))
+            .ui(ui)
+            .on_hover_text("Chroma");
+        state.c = chroma_val / 0.325;
+    });
 
     // --- Hue slider ---
-    color_slider_1d_grid(
-        ui,
-        &mut state.h,
-        lch.h / std::f32::consts::TAU,
-        |h_mut| {
-            try_oklch_to_color32(Oklch {
-                l: l,
-                c: c,
-                h: h_mut * std::f32::consts::TAU,
-            })
-        },
-        &"hue",
-    )
-    .on_hover_text("Hue");
+    ui.horizontal(|ui| {
+        color_slider_1d_grid(
+            ui,
+            &mut state.h,
+            lch.h / std::f32::consts::TAU,
+            |h_mut| {
+                try_oklch_to_color32(Oklch {
+                    l: l,
+                    c: c,
+                    h: h_mut * std::f32::consts::TAU,
+                })
+            },
+            &"hue",
+        )
+        .on_hover_text("Hue");
+        let mut hue_val = state.h * 360.;
+        DragValue::new(&mut hue_val)
+            .prefix("H: ")
+            .speed(1.0)
+            .range(0.0..=360.)
+            .custom_formatter(|n, _| format!("{n:.1}"))
+            .ui(ui)
+            .on_hover_text("Hue");
+        state.h = hue_val / 360.;
+    });
+
+    // let edited = drag_value(ui, "H ", &mut state.h).changed();
 
     lch.l = state.l;
     lch.c = state.c * 0.325;
