@@ -938,9 +938,9 @@ fn color_slider_2d_grid_oklch_radial_2(
     let center = rect.center();
     let radius = rect.width().min(rect.height()) * 0.5;
 
-    // ----------------------------
-    // Interaction (FIXED polar mapping)
-    // ----------------------------
+    // -------------
+    // Interaction
+    // -------------
     if let Some(mpos) = response.interact_pointer_pos() {
         let v = (mpos - center) / radius;
 
@@ -1042,14 +1042,22 @@ fn color_slider_2d_grid_oklch_radial_2(
         ui.painter()
             .rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
 
+        // Radial lines
+        for i in 0..6 {
+            ui.painter().circle(
+                Pos2::new(center.x, center.y),
+                1. + 25. * i as f32,
+                Color32::TRANSPARENT,
+                egui::Stroke::new(1., Color32::from_rgba_unmultiplied(200, 200, 200, 100)),
+            );
+        }
+
         // -------
         // Handle
         // -------
         let hue = *hue_value * std::f32::consts::TAU;
 
-        // let r = (1.0 - (*c_value)).clamp(0.0, 1.0);
         let r = (*c_value).clamp(0.0, 1.0);
-        // let r = (1.0 - (*c_value) / 0.325).clamp(0.0, 1.0);
 
         let x = center.x + hue.cos() * r * radius;
         let y = center.y - hue.sin() * r * radius;
@@ -1396,7 +1404,7 @@ pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Color32) -> Response {
     }
 
     const COLOR_SLIDER_WIDTH: f32 = 275.0;
-
+    // egui::Window::new("Debug: data tiles").movable(true).resizable(true).show(ctx, |ui| {
     Popup::menu(&button_response)
         .id(popup_id)
         .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
