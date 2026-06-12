@@ -1,9 +1,11 @@
 //! Color picker widgets.
 
 // use egui::util::fixed_cache::FixedCache;
+mod conversions;
+use crate::conversions::*;
 use egui::{
-    Context, DragValue, Id, Painter, Popup, PopupCloseBehavior, Response, Sense, Ui, Widget as _,
-    WidgetInfo, WidgetType, epaint, lerp, remap_clamp, TextureHandle, Pos2
+    Context, DragValue, Id, Painter, Popup, PopupCloseBehavior, Pos2, Response, Sense,
+    TextureHandle, Ui, Widget as _, WidgetInfo, WidgetType, epaint, lerp, remap_clamp,
 };
 use epaint::{
     Mesh, Rect, Shape, Stroke, StrokeKind, Vec2,
@@ -161,7 +163,7 @@ fn color_slider_1d(ui: &mut Ui, value: &mut f32, color_at: impl Fn(f32) -> Color
                 mesh.colored_vertex(pos2(x, rect.bottom()), color);
                 if i < N {
                     mesh.add_triangle(2 * i + 0, 2 * i + 1, 2 * i + 2);
-                    mesh.add_triangle(2 * i + 1, 2 * i + 2, 2 * i + 3);
+                    // mesh.add_triangle(2 * i + 1, 2 * i + 2, 2 * i + 3);
                 }
             }
             ui.painter().add(Shape::mesh(mesh));
@@ -185,6 +187,107 @@ fn color_slider_1d(ui: &mut Ui, value: &mut f32, color_at: impl Fn(f32) -> Color
                 Stroke::new(visuals.fg_stroke.width, contrast_color(picked_color)),
             ));
         }
+    }
+
+    response
+}
+
+fn color_slider_1d_grid(
+    ui: &mut Ui,
+    value: &mut f32,
+    color_at: impl Fn(f32) -> Color32,
+) -> Response {
+    let desired_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
+    let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
+
+    if let Some(mpos) = response.interact_pointer_pos() {
+        *value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
+    }
+
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(&response);
+
+        let tex_id = egui::Id::new("color_slider_tex_1d");
+
+        let mut tex = ui
+            .data(|d| d.get_temp::<Option<egui::TextureHandle>>(tex_id))
+            .unwrap_or(None);
+
+        let nx = rect.width().max(1.0).round() as usize;
+        let ny = rect.height().max(1.0).round() as usize;
+
+        let rebuild = tex.is_none() || tex.as_ref().unwrap().size() != [nx, ny];
+
+        background_checkers(ui.painter(), rect);
+
+        if rebuild {
+            let mut pixels = Vec::with_capacity(nx * ny * 4);
+
+            // Row-major order as expected by ColorImage
+            for _y in 0..ny {
+                for x in 0..nx {
+                    let t = if nx > 1 {
+                        x as f32 / (nx as f32 - 1.0)
+                    } else {
+                        0.0
+                    };
+
+                    let color = color_at(t);
+
+                    pixels.push(color.r());
+                    pixels.push(color.g());
+                    pixels.push(color.b());
+                    pixels.push(color.a());
+                }
+            }
+
+            let image = egui::ColorImage::from_rgba_unmultiplied([nx, ny], &pixels);
+
+            match tex.as_mut() {
+                Some(existing) => {
+                    existing.set(image, egui::TextureOptions::LINEAR);
+                }
+                None => {
+                    tex = Some(ui.ctx().load_texture(
+                        "color_slider_1d",
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    ));
+                }
+            }
+
+            ui.data_mut(|d| {
+                d.insert_temp(tex_id, tex.clone());
+            });
+        }
+
+        // Actually draw the texture
+        if let Some(tex) = &tex {
+            ui.painter().image(
+                tex.id(),
+                rect,
+                Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
+        }
+
+        ui.painter()
+            .rect_stroke(rect, 0.0, visuals.bg_stroke, StrokeKind::Inside);
+
+        // Show current value marker
+        let x = lerp(rect.left()..=rect.right(), *value);
+        let r = rect.height() / 4.0;
+        let picked_color = color_at(*value);
+
+        ui.painter().add(Shape::convex_polygon(
+            vec![
+                pos2(x, rect.center().y),
+                pos2(x + r, rect.bottom()),
+                pos2(x - r, rect.bottom()),
+            ],
+            picked_color,
+            Stroke::new(visuals.fg_stroke.width, contrast_color(picked_color)),
+        ));
     }
 
     response
@@ -279,15 +382,14 @@ fn color_slider_2d_grid(
         // ----------------------------
         let tex_id = egui::Id::new("color_slider_tex");
 
-        let mut tex = ui.data(|d| {
-            d.get_temp::<Option<egui::TextureHandle>>(tex_id)
-        }).unwrap_or(None);
+        let mut tex = ui
+            .data(|d| d.get_temp::<Option<egui::TextureHandle>>(tex_id))
+            .unwrap_or(None);
 
         let pixels_w = size.x as usize;
         let pixels_h = size.y as usize;
 
-        let rebuild = tex.is_none()
-            || tex.as_ref().unwrap().size_vec2() != size;
+        let rebuild = tex.is_none() || tex.as_ref().unwrap().size_vec2() != size;
 
         if rebuild {
             let mut pixels = Vec::with_capacity(pixels_w * pixels_h * 4);
@@ -307,10 +409,7 @@ fn color_slider_2d_grid(
                 }
             }
 
-            let image = egui::ColorImage::from_rgba_unmultiplied(
-                [pixels_w, pixels_h],
-                &pixels,
-            );
+            let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
 
             if tex.is_none() {
                 tex = Some(ui.ctx().load_texture(
@@ -330,8 +429,12 @@ fn color_slider_2d_grid(
         // ----------------------------
         // 2. Paint image
         // ----------------------------
-        ui.painter()
-            .image(tex.id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+        ui.painter().image(
+            tex.id(),
+            rect,
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            Color32::WHITE,
+        );
 
         // ----------------------------
         // 3. Outline
@@ -351,10 +454,7 @@ fn color_slider_2d_grid(
             Pos2::new(x, y),
             rect.width() / 12.0,
             picked_color,
-            egui::Stroke::new(
-                visuals.fg_stroke.width,
-                contrast_color(picked_color),
-            ),
+            egui::Stroke::new(visuals.fg_stroke.width, contrast_color(picked_color)),
         );
     }
 
@@ -379,6 +479,14 @@ pub enum Alpha {
 
     /// Show both blend and additive options.
     BlendOrAdditive,
+}
+
+fn oklch_to_color32(c: Oklch) -> Color32 {
+    let srgb = linear_srgb_to_srgb(oklab_to_linear_srgb(oklch_to_oklab(c)));
+
+    let (r, g, b) = srgb.components();
+
+    Color32::from_rgb(r, g, b)
 }
 
 fn color_picker_hsvag_2d(ui: &mut Ui, hsvag: &mut HsvaGamma, alpha: Alpha) {
@@ -482,14 +590,12 @@ fn color_picker_hsvag_2d(ui: &mut Ui, hsvag: &mut HsvaGamma, alpha: Alpha) {
     // color_slider_2d(ui, s, v, |s, v| HsvaGamma { s, v, ..opaque }.into());
     color_slider_2d_grid(ui, s, v, |s, v| HsvaGamma { s, v, ..opaque }.into());
 
-    color_slider_1d(ui, h, |h| {
-        HsvaGamma {
-            h,
-            s: 1.0,
-            v: 1.0,
-            a: 1.0,
-        }
-        .into()
+    color_slider_1d_grid(ui, h, |h| {
+        oklch_to_color32(Oklch {
+            l: 0.75,
+            c: 0.15,
+            h: h * std::f32::consts::TAU,
+        })
     })
     .on_hover_text("Hue");
 
@@ -579,7 +685,8 @@ fn rgba_edit_ui(ui: &mut Ui, [r, g, b, a]: &mut [f32; 4], alpha: Alpha) -> bool 
             if alpha == Alpha::Opaque {
                 ui.ctx().copy_text(format!("{r:.03}, {g:.03}, {b:.03}"));
             } else {
-                ui.ctx().copy_text(format!("{r:.03}, {g:.03}, {b:.03}, {a:.03}"));
+                ui.ctx()
+                    .copy_text(format!("{r:.03}, {g:.03}, {b:.03}, {a:.03}"));
             }
         }
 
@@ -616,7 +723,8 @@ pub fn color_picker_hsva_2d(ui: &mut Ui, hsva: &mut Hsva, alpha: Alpha) -> bool 
 /// Returns `true` on change.
 pub fn color_picker_color32(ui: &mut Ui, srgba: &mut Color32, alpha: Alpha) -> bool {
     // let mut hsva = color_cache_get(ui.ctx(), *srgba);
-    let mut hsva: Hsva = Hsva::from_srgba_premultiplied([srgba.r(), srgba.g(), srgba.b(), srgba.a()]);
+    let mut hsva: Hsva =
+        Hsva::from_srgba_premultiplied([srgba.r(), srgba.g(), srgba.b(), srgba.a()]);
     let changed = color_picker_hsva_2d(ui, &mut hsva, alpha);
     *srgba = Color32::from(hsva);
     changed
@@ -648,7 +756,8 @@ pub fn color_edit_button_hsva(ui: &mut Ui, hsva: &mut Hsva, alpha: Alpha) -> Res
 /// Shows a button with the given color.
 /// If the user clicks the button, a full color picker is shown.
 pub fn color_edit_button_srgba(ui: &mut Ui, srgba: &mut Color32, alpha: Alpha) -> Response {
-    let mut hsva: Hsva = Hsva::from_srgba_premultiplied([srgba.r(), srgba.g(), srgba.b(), srgba.a()]);
+    let mut hsva: Hsva =
+        Hsva::from_srgba_premultiplied([srgba.r(), srgba.g(), srgba.b(), srgba.a()]);
     let response = color_edit_button_hsva(ui, &mut hsva, alpha);
     *srgba = Color32::from(hsva);
     response
