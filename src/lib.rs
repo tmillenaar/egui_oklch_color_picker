@@ -674,6 +674,406 @@ fn oklch_to_color32(c: Oklch) -> Color32 {
 //     }
 // }
 //
+//
+//
+
+fn color_slider_2d_grid_oklch(
+    ui: &mut Ui,
+    l_value: &mut f32,
+    c_value: &mut f32,
+    hue: f32,
+    color_at: impl Fn(f32, f32, f32) -> Option<Color32>,
+) -> Response {
+    let desired_size = Vec2::splat(ui.spacing().slider_width);
+    let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
+
+    // ----------------------------
+    // Interaction (x = chroma, y = lightness)
+    // ----------------------------
+    if let Some(mpos) = response.interact_pointer_pos() {
+        *c_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
+        *l_value = remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
+    }
+
+    if ui.is_rect_visible(rect) {
+        let size = rect.size();
+        let tex_id = ui.id().with(("oklch_2d_tex", (hue * 1000.0) as u32));
+
+        let mut tex = ui
+            .data(|d| d.get_temp::<Option<egui::TextureHandle>>(tex_id))
+            .unwrap_or(None);
+
+        let pixels_w = size.x as usize;
+        let pixels_h = size.y as usize;
+
+        // Fixme: Also dependent on change in l,c,h values, forn now just always rebuild
+        // let rebuild = tex.is_none() || tex.as_ref().unwrap().size_vec2() != size;
+        let rebuild = true;
+
+        if rebuild {
+            let mut pixels = Vec::with_capacity(pixels_w * pixels_h * 4);
+
+            for y in (0..pixels_h).rev() {
+                let lt = y as f32 / (pixels_h as f32 - 1.0); // lightness
+
+                for x in 0..pixels_w {
+                    let ct = x as f32 / (pixels_w as f32 - 1.0); // chroma
+
+                    let color = color_at(lt, ct, hue);
+
+                    let (r, g, b, a) = match color {
+                        Some(c) => (c.r(), c.g(), c.b(), c.a()),
+                        None => (0, 0, 0, 0), // invalid → fully transparent
+                    };
+
+                    pixels.push(r);
+                    pixels.push(g);
+                    pixels.push(b);
+                    pixels.push(a);
+                }
+            }
+
+            let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
+
+            if tex.is_none() {
+                tex = Some(ui.ctx().load_texture(
+                    "oklch_2d_slider",
+                    image,
+                    egui::TextureOptions::LINEAR,
+                ));
+            }
+
+            ui.data_mut(|d| {
+                d.insert_temp(tex_id, tex.clone());
+            });
+        }
+
+        let tex = tex.as_ref().unwrap();
+
+        // ----------------------------
+        // Draw texture
+        // ----------------------------
+        ui.painter().image(
+            tex.id(),
+            rect,
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            Color32::WHITE,
+        );
+
+        // ----------------------------
+        // Border
+        // ----------------------------
+        let visuals = ui.style().interact(&response);
+        ui.painter()
+            .rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
+
+        // ----------------------------
+        // Handle
+        // ----------------------------
+        let x = lerp(rect.left()..=rect.right(), *c_value);
+        let y = lerp(rect.bottom()..=rect.top(), *l_value);
+
+        let picked_color = color_at(*l_value, *c_value, hue).unwrap_or(Color32::TRANSPARENT);
+
+        ui.painter().circle(
+            Pos2::new(x, y),
+            rect.width() / 12.0,
+            picked_color,
+            egui::Stroke::new(visuals.fg_stroke.width, contrast_color(picked_color)),
+        );
+    }
+
+    response
+}
+
+fn color_slider_2d_grid_oklch_radial(
+    ui: &mut Ui,
+    l_value: &mut f32,
+    hue_value: &mut f32, // 0..1
+    chroma: f32,
+    color_at: impl Fn(f32, f32, f32) -> Option<Color32>,
+) -> Response {
+    let desired_size = Vec2::splat(ui.spacing().slider_width);
+    let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
+
+    let center = rect.center();
+    let radius = rect.width().min(rect.height()) * 0.5;
+
+    // ----------------------------
+    // Interaction (FIXED polar mapping)
+    // ----------------------------
+    if let Some(mpos) = response.interact_pointer_pos() {
+        let v = (mpos - center) / radius;
+
+        let r = v.length().clamp(0.0, 1.0);
+
+        // IMPORTANT: invert Y for correct hue rotation direction
+        let angle = (-v.y).atan2(v.x);
+
+        let mut h = angle / std::f32::consts::TAU;
+        if h < 0.0 {
+            h += 1.0;
+        }
+
+        *hue_value = h.clamp(0.0, 1.0);
+
+        // center = light, edge = dark (as you requested)
+        *l_value = (1.0 - r).clamp(0.0, 1.0);
+    }
+
+    if ui.is_rect_visible(rect) {
+        let size = rect.size();
+        let tex_id = ui
+            .id()
+            .with(("oklch_radial_tex_stable_chroma", (chroma * 1000.0) as u32));
+
+        let mut tex = ui
+            .data(|d| d.get_temp::<Option<egui::TextureHandle>>(tex_id))
+            .unwrap_or(None);
+
+        let pixels_w = size.x as usize;
+        let pixels_h = size.y as usize;
+
+        let rebuild = true;
+
+        if rebuild {
+            let mut pixels = Vec::with_capacity(pixels_w * pixels_h * 4);
+
+            for y in 0..pixels_h {
+                for x in 0..pixels_w {
+                    let nx = (x as f32 / (pixels_w as f32 - 1.0)) * 2.0 - 1.0;
+                    let ny = (y as f32 / (pixels_h as f32 - 1.0)) * 2.0 - 1.0;
+
+                    let v = Vec2::new(nx, ny);
+                    let r = v.length();
+
+                    if r > 1.0 {
+                        pixels.extend([0, 0, 0, 0]);
+                        continue;
+                    }
+
+                    let mut angle = (-ny).atan2(nx);
+                    if angle < 0.0 {
+                        angle += std::f32::consts::TAU;
+                    }
+
+                    let h = angle / std::f32::consts::TAU;
+                    let l = 1.0 - r;
+
+                    let color = color_at(l, chroma, h);
+
+                    let (r8, g8, b8, a8) = match color {
+                        Some(c) => (c.r(), c.g(), c.b(), c.a()),
+                        None => (0, 0, 0, 0),
+                    };
+
+                    pixels.push(r8);
+                    pixels.push(g8);
+                    pixels.push(b8);
+                    pixels.push(a8);
+                }
+            }
+
+            let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
+
+            if tex.is_none() {
+                tex = Some(ui.ctx().load_texture(
+                    "oklch_radial_fixed",
+                    image,
+                    egui::TextureOptions::LINEAR,
+                ));
+            }
+
+            ui.data_mut(|d| {
+                d.insert_temp(tex_id, tex.clone());
+            });
+        }
+
+        let tex = tex.as_ref().unwrap();
+
+        ui.painter().image(
+            tex.id(),
+            rect,
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            Color32::WHITE,
+        );
+
+        let visuals = ui.style().interact(&response);
+        ui.painter()
+            .rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
+
+        // ----------------------------
+        // Handle (FIXED)
+        // ----------------------------
+        let hue = *hue_value * std::f32::consts::TAU;
+
+        let r = (1.0 - *l_value).clamp(0.0, 1.0);
+
+        let x = center.x + hue.cos() * r * radius;
+        let y = center.y - hue.sin() * r * radius;
+
+        let picked_color = color_at(*l_value, chroma, *hue_value).unwrap_or(Color32::TRANSPARENT);
+
+        ui.painter().circle(
+            Pos2::new(x, y),
+            rect.width() / 14.0,
+            picked_color,
+            egui::Stroke::new(visuals.fg_stroke.width, contrast_color(picked_color)),
+        );
+    }
+
+    response
+}
+
+fn color_slider_2d_grid_oklch_radial_2(
+    ui: &mut Ui,
+    c_value: &mut f32,
+    hue_value: &mut f32, // 0..1
+    lightness: f32,
+    color_at: impl Fn(f32, f32, f32) -> Option<Color32>,
+) -> Response {
+    let desired_size = Vec2::splat(ui.spacing().slider_width);
+    let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
+
+    let center = rect.center();
+    let radius = rect.width().min(rect.height()) * 0.5;
+
+    // ----------------------------
+    // Interaction (FIXED polar mapping)
+    // ----------------------------
+    if let Some(mpos) = response.interact_pointer_pos() {
+        let v = (mpos - center) / radius;
+
+        let r = v.length().clamp(0.0, 1.0);
+
+        // IMPORTANT: invert Y for correct hue rotation direction
+        let angle = (-v.y).atan2(v.x);
+
+        let mut h = angle / std::f32::consts::TAU;
+        if h < 0.0 {
+            h += 1.0;
+        }
+
+        *hue_value = h.clamp(0.0, 1.0);
+
+        // center = light, edge = dark (as you requested)
+        *c_value = r.clamp(0.0, 1.0);
+    }
+
+    if ui.is_rect_visible(rect) {
+        let size = rect.size();
+        let tex_id = ui.id().with((
+            "oklch_radial_tex_stable_lightness",
+            (lightness * 1000.0) as u32,
+        ));
+
+        let mut tex = ui
+            .data(|d| d.get_temp::<Option<egui::TextureHandle>>(tex_id))
+            .unwrap_or(None);
+
+        let pixels_w = size.x as usize;
+        let pixels_h = size.y as usize;
+
+        let rebuild = true;
+
+        if rebuild {
+            let mut pixels = Vec::with_capacity(pixels_w * pixels_h * 4);
+
+            for y in 0..pixels_h {
+                for x in 0..pixels_w {
+                    let nx = (x as f32 / (pixels_w as f32 - 1.0)) * 2.0 - 1.0;
+                    let ny = (y as f32 / (pixels_h as f32 - 1.0)) * 2.0 - 1.0;
+
+                    let v = Vec2::new(nx, ny);
+                    let r = v.length();
+
+                    if r > 1.0 {
+                        pixels.extend([0, 0, 0, 0]);
+                        continue;
+                    }
+
+                    let mut angle = (-ny).atan2(nx);
+                    if angle < 0.0 {
+                        angle += std::f32::consts::TAU;
+                    }
+
+                    let h = angle / std::f32::consts::TAU;
+                    let c = r; // / 0.325;
+
+                    let color = color_at(lightness, c, h);
+
+                    let (r8, g8, b8, a8) = match color {
+                        Some(c) => (c.r(), c.g(), c.b(), c.a()),
+                        None => (0, 0, 0, 0),
+                    };
+
+                    pixels.push(r8);
+                    pixels.push(g8);
+                    pixels.push(b8);
+                    pixels.push(a8);
+                }
+            }
+
+            let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
+
+            if tex.is_none() {
+                tex = Some(ui.ctx().load_texture(
+                    "oklch_radial_fixed",
+                    image,
+                    egui::TextureOptions::LINEAR,
+                ));
+            }
+
+            ui.data_mut(|d| {
+                d.insert_temp(tex_id, tex.clone());
+            });
+        }
+
+        let tex = tex.as_ref().unwrap();
+
+        ui.painter().image(
+            tex.id(),
+            rect,
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            Color32::WHITE,
+        );
+
+        let visuals = ui.style().interact(&response);
+        ui.painter()
+            .rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
+
+        // -------
+        // Handle
+        // -------
+        let hue = *hue_value * std::f32::consts::TAU;
+
+        // let r = (1.0 - (*c_value)).clamp(0.0, 1.0);
+        let r = (*c_value).clamp(0.0, 1.0);
+        // let r = (1.0 - (*c_value) / 0.325).clamp(0.0, 1.0);
+
+        let x = center.x + hue.cos() * r * radius;
+        let y = center.y - hue.sin() * r * radius;
+
+        let picked_color =
+            color_at(lightness, *c_value, *hue_value).unwrap_or(Color32::TRANSPARENT);
+
+        ui.painter().circle(
+            Pos2::new(x, y),
+            rect.width() / 14.0,
+            picked_color,
+            egui::Stroke::new(visuals.fg_stroke.width, contrast_color(picked_color)),
+        );
+    }
+
+    response
+}
+
+#[derive(Debug, Clone)]
+enum OKLabPlotType {
+    StableLightness,
+    StableChroma,
+    StableHue,
+}
 
 fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
     let current_color_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
@@ -696,6 +1096,83 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
     let l = state.l;
     let c = state.c * 0.325;
     let h = state.h * std::f32::consts::TAU;
+
+    let mut tab = ui.data(|d| {
+        d.get_temp::<OKLabPlotType>(ui.id())
+            .unwrap_or(OKLabPlotType::StableHue)
+    });
+    ui.horizontal(|ui| {
+        if ui
+            .selectable_label(matches!(tab, OKLabPlotType::StableHue), "Lightness/Chroma")
+            .clicked()
+        {
+            tab = OKLabPlotType::StableHue;
+        }
+        if ui
+            .selectable_label(matches!(tab, OKLabPlotType::StableChroma), "Hue/Lightness")
+            .clicked()
+        {
+            tab = OKLabPlotType::StableChroma;
+        }
+        if ui
+            .selectable_label(matches!(tab, OKLabPlotType::StableLightness), "Hue/Chroma")
+            .clicked()
+        {
+            tab = OKLabPlotType::StableLightness;
+        }
+    });
+
+    ui.data_mut(|d| {
+        d.insert_temp(ui.id(), tab.clone());
+    });
+
+    match tab {
+        OKLabPlotType::StableHue => {
+            color_slider_2d_grid_oklch(
+                ui,
+                &mut state.l,
+                &mut state.c,
+                state.h * std::f32::consts::TAU,
+                |l, c, h| {
+                    try_oklch_to_color32(Oklch {
+                        l,
+                        c: c * 0.325, // match your chroma scaling
+                        h,
+                    })
+                },
+            );
+        }
+        OKLabPlotType::StableChroma => {
+            color_slider_2d_grid_oklch_radial(
+                ui,
+                &mut state.l,
+                &mut state.h,
+                state.c,
+                |l, c, h| {
+                    try_oklch_to_color32(Oklch {
+                        l,
+                        c: c * 0.325,
+                        h: h * std::f32::consts::TAU,
+                    })
+                },
+            );
+        }
+        OKLabPlotType::StableLightness => {
+            color_slider_2d_grid_oklch_radial_2(
+                ui,
+                &mut state.c,
+                &mut state.h,
+                state.l,
+                |l, c, h| {
+                    try_oklch_to_color32(Oklch {
+                        l: l,
+                        c: c * 0.325,
+                        h: h * std::f32::consts::TAU,
+                    })
+                },
+            );
+        }
+    }
 
     ui.horizontal(|ui| {
         show_srgba_unmultiplied(ui, oklch_to_color32(*lch).to_array(), current_color_size)
@@ -794,7 +1271,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
         d.insert_temp(state_id, state);
     });
 
-    // TODO: Add alpha slider
+    // TODO: Add alpha slider?
 }
 
 fn input_type_button_ui(ui: &mut Ui) {
