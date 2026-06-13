@@ -26,6 +26,11 @@ fn contrast_color(color: impl Into<Rgba>) -> Color32 {
 /// Should always be a multiple of 6 to hit the peak hues in HSV/HSL (every 60°).
 const N: u32 = 6 * 6;
 
+/// In rust, & is the remainder, not the modulus
+fn modulus(val: f32, modulus: f32) -> f32 {
+    ((val % modulus) + modulus) % modulus
+}
+
 fn background_checkers(painter: &Painter, rect: Rect) {
     let rect = rect.shrink(0.5); // Small hack to avoid the checkers from peeking through the sides
     if !rect.is_positive() {
@@ -916,7 +921,8 @@ fn color_slider_2d_grid_oklch_radial(
 
         ui.painter().circle(
             Pos2::new(x, y),
-            rect.width() / 14.0,
+            // rect.width() / 14.0,
+            10.,
             picked_color,
             egui::Stroke::new(visuals.fg_stroke.width, contrast_color(picked_color)),
         );
@@ -935,14 +941,14 @@ fn color_slider_2d_grid_oklch_radial_2(
     let desired_size = Vec2::splat(ui.spacing().slider_width);
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 
-    let center = rect.center();
-    let radius = rect.width().min(rect.height()) * 0.5;
+    let ui_center = rect.center();
+    let rect_radius = rect.width().min(rect.height()) * 0.5;
 
     // -------------
     // Interaction
     // -------------
     if let Some(mpos) = response.interact_pointer_pos() {
-        let v = (mpos - center) / radius;
+        let v = (mpos - ui_center) / rect_radius;
 
         let r = v.length().clamp(0.0, 1.0);
 
@@ -979,38 +985,35 @@ fn color_slider_2d_grid_oklch_radial_2(
         if rebuild {
             let mut pixels = Vec::with_capacity(pixels_w * pixels_h * 4);
 
+            let radius_px = pixels_w.min(pixels_h) as f32 * 0.5;
+            let cx = pixels_w as f32 * 0.5;
+            let cy = pixels_h as f32 * 0.5;
             for y in 0..pixels_h {
                 for x in 0..pixels_w {
-                    let nx = (x as f32 / (pixels_w as f32 - 1.0)) * 2.0 - 1.0;
-                    let ny = (y as f32 / (pixels_h as f32 - 1.0)) * 2.0 - 1.0;
+                    let dx = (x as f32 + 0.5) - cx;
+                    let dy = (y as f32 + 0.5) - cy;
 
-                    let v = Vec2::new(nx, ny);
-                    let r = v.length();
+                    let x_normalized = dx / radius_px;
+                    let y_normalized = dy / radius_px;
+
+                    let r = (x_normalized * x_normalized + y_normalized * y_normalized).sqrt();
 
                     if r > 1.0 {
                         pixels.extend([0, 0, 0, 0]);
                         continue;
                     }
 
-                    let mut angle = (-ny).atan2(nx);
-                    if angle < 0.0 {
-                        angle += std::f32::consts::TAU;
-                    }
+                    let mut angle = (-y_normalized).atan2(x_normalized);
 
                     let h = angle / std::f32::consts::TAU;
-                    let c = r; // / 0.325;
+                    let c = r;
 
                     let color = color_at(lightness, c, h);
 
-                    let (r8, g8, b8, a8) = match color {
-                        Some(c) => (c.r(), c.g(), c.b(), c.a()),
-                        None => (0, 0, 0, 0),
+                    match color {
+                        Some(c) => pixels.extend(c.to_array()),
+                        None => pixels.extend([0, 0, 0, 0]),
                     };
-
-                    pixels.push(r8);
-                    pixels.push(g8);
-                    pixels.push(b8);
-                    pixels.push(a8);
                 }
             }
 
@@ -1045,8 +1048,8 @@ fn color_slider_2d_grid_oklch_radial_2(
         // Radial lines
         for i in 0..6 {
             ui.painter().circle(
-                Pos2::new(center.x, center.y),
-                1. + 25. * i as f32,
+                Pos2::new(ui_center.x, ui_center.y),
+                0.5 + 25. * i as f32,
                 Color32::TRANSPARENT,
                 egui::Stroke::new(1., Color32::from_rgba_unmultiplied(200, 200, 200, 100)),
             );
@@ -1059,15 +1062,16 @@ fn color_slider_2d_grid_oklch_radial_2(
 
         let r = (*c_value).clamp(0.0, 1.0);
 
-        let x = center.x + hue.cos() * r * radius;
-        let y = center.y - hue.sin() * r * radius;
+        let x = ui_center.x + hue.cos() * r * rect_radius;
+        let y = ui_center.y - hue.sin() * r * rect_radius;
 
         let picked_color =
             color_at(lightness, *c_value, *hue_value).unwrap_or(Color32::TRANSPARENT);
 
         ui.painter().circle(
             Pos2::new(x, y),
-            rect.width() / 14.0,
+            // rect.width() / 14.0,
+            10.,
             picked_color,
             egui::Stroke::new(visuals.fg_stroke.width, contrast_color(picked_color)),
         );
