@@ -1134,10 +1134,32 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
         }
     });
 
+    ui.horizontal(|ui| {
+        input_type_button_ui(ui);
+
+        // TODO: get nearest color!
+        // let color = try_oklch_to_color32(Oklch {
+        let color = oklch_to_color32(Oklch {
+            l,
+            c: c * 0.325,
+            h: h * std::f32::consts::TAU,
+        });
+
+        if ui
+            .button("📋")
+            .on_hover_text("Click to copy color values")
+            .clicked()
+        {
+            ui.ctx().copy_text(format!("{}, {}, {}", color.r(), color.g(), color.b()));
+        }
+        ui.label(format!("R {}    G {}    B {}", color.r(), color.g(), color.b()))
+    });
+
     ui.data_mut(|d| {
         d.insert_temp(ui.id(), tab.clone());
     });
-
+    show_srgba_unmultiplied(ui, oklch_to_color32(*lch).to_array(), current_color_size)
+        .on_hover_text("Selected color");
     match tab {
         OKLabPlotType::StableHue => {
             color_slider_2d_grid_oklch(
@@ -1185,20 +1207,6 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
             );
         }
     }
-
-    ui.horizontal(|ui| {
-        show_srgba_unmultiplied(ui, oklch_to_color32(*lch).to_array(), current_color_size)
-            .on_hover_text("Selected color");
-        // if ui
-        //     .button("📋")
-        //     .on_hover_text("Click to copy color values")
-        //     .clicked()
-        // {
-        //     let srgb: Srgb =
-        //         linear_srgb_to_srgb(oklab_to_linear_srgb(oklch_to_oklab(state.previous_color)));
-        //     ui.copy_text(format!("{srgb.r}, {srgb.g}, {srgb.b}"));
-        // };
-    });
 
     // --- Lightness slider (0..1) ---
     ui.horizontal(|ui| {
