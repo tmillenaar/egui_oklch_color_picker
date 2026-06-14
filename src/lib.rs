@@ -2,6 +2,8 @@
 
 // use egui::util::fixed_cache::FixedCache;
 mod conversions;
+use std::f32;
+
 use crate::conversions::*;
 use egui::{
     Context, DragValue, Id, Painter, Popup, PopupCloseBehavior, Pos2, Response, Sense,
@@ -778,17 +780,62 @@ fn color_slider_2d_grid_oklch(
         let x = lerp(rect.left()..=rect.right(), *c_value);
         let y = lerp(rect.bottom()..=rect.top(), *l_value);
 
-        let picked_color = color_at(*l_value, *c_value, hue).unwrap_or(Color32::TRANSPARENT);
-
-        ui.painter().circle(
+        draw_inward_triangles(
+            ui.painter(),
             Pos2::new(x, y),
-            rect.width() / 12.0,
-            picked_color,
-            egui::Stroke::new(visuals.fg_stroke.width, contrast_color(picked_color)),
+            4.0,  // radius
+            4.0,  // size
+            4,    // count
+            45.0, // radial-offset
+            Color32::WHITE,
+            Stroke {
+                width: 0.5,
+                color: Color32::BLACK,
+            },
         );
     }
 
     response
+}
+
+pub fn draw_inward_triangles(
+    painter: &Painter,
+    center: Pos2,
+    radius: f32, // distance from center to inner tip
+    size: f32,   // side length of equilateral triangle
+    count: usize,
+    offset_deg: f32,
+    fill: Color32,
+    stroke: Stroke,
+) {
+    if count == 0 {
+        return;
+    }
+
+    let height = size * (3.0_f32).sqrt() * 0.5;
+
+    let base_angle = std::f32::consts::TAU * 0.75; // bottom
+    let offset = offset_deg.to_radians();
+    let step = std::f32::consts::TAU / count as f32;
+
+    for i in 0..count {
+        let angle = base_angle + offset + step * i as f32;
+
+        let outward = Vec2::new(angle.cos(), angle.sin());
+        let inward = -outward;
+
+        // Inner tip sits exactly radius units from center.
+        let tip = center + outward * radius;
+
+        let base_center = tip + outward * height;
+
+        let perp = Vec2::new(-outward.y, outward.x);
+
+        let left = base_center + perp * (size * 0.5);
+        let right = base_center - perp * (size * 0.5);
+
+        painter.add(Shape::convex_polygon(vec![tip, left, right], fill, stroke));
+    }
 }
 
 fn color_slider_2d_radial(
@@ -928,7 +975,7 @@ fn color_slider_2d_radial(
         // ----------------------------
         // Handle (FIXED)
         // ----------------------------
-        let hue = *angle_value * std::f32::consts::TAU;
+        let angle = *angle_value * std::f32::consts::TAU;
 
         let r = if invert_radial_value {
             (1.0 - *radial_value).clamp(0.0, 1.0)
@@ -936,18 +983,26 @@ fn color_slider_2d_radial(
             (*radial_value).clamp(0.0, 1.0)
         };
 
-        let x = ui_center.x + hue.cos() * r * radius;
-        let y = ui_center.y - hue.sin() * r * radius;
+        let x = ui_center.x + angle.cos() * r * radius;
+        let y = ui_center.y - angle.sin() * r * radius;
 
-        // let picked_color = color_at(*l_value, chroma, *hue_value).unwrap_or(Color32::TRANSPARENT);
-
-        ui.painter().circle(
+        draw_inward_triangles(
+            ui.painter(),
             Pos2::new(x, y),
-            // rect.width() / 14.0,
-            10.,
+            4.0,  // radius
+            4.0,  // size
+            4,    // count
+            45.0, // radial-offset
             Color32::WHITE,
-            egui::Stroke::new(visuals.fg_stroke.width, Color32::TRANSPARENT), // contrast_color(picked_color)
+            Stroke {
+                width: 0.5,
+                color: Color32::BLACK,
+            },
         );
+    }
+
+    if response.is_pointer_button_down_on() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::None);
     }
 
     response
