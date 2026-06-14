@@ -840,6 +840,11 @@ pub fn draw_inward_triangles(
     }
 }
 
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
 fn color_slider_2d_radial(
     ui: &mut Ui,
     stable_value: f32,
@@ -848,7 +853,58 @@ fn color_slider_2d_radial(
     invert_radial_value: bool,
     color_at: impl Fn(f32, f32, f32) -> Option<Color32>,
     ui_identifyable_label: &str,
+    smoother_border: bool,
 ) -> Response {
+    let is_valid = |angle: f32, r: f32, stable_value: f32| -> bool {
+        color_at(angle / std::f32::consts::TAU, r, stable_value).is_some()
+    };
+
+    fn distance_to_boundary(
+        angle: f32,
+        mut r: f32,
+        stable_value: f32,
+        max_step: f32,
+        is_valid: impl Fn(f32, f32, f32) -> bool,
+    ) -> f32 {
+        // If already invalid, we assume we're outside; search inward instead
+        let start_valid = is_valid(angle, r, stable_value);
+
+        let mut low = 0.0;
+        let mut high = max_step;
+
+        // Expand high until we cross boundary
+        if start_valid {
+            while is_valid(angle, r + high, stable_value) {
+                high *= 2.0;
+                if high > 1.0 {
+                    break;
+                }
+            }
+        } else {
+            while !is_valid(angle, r - high, stable_value) {
+                high *= 2.0;
+                if high > 1.0 {
+                    break;
+                }
+            }
+        }
+
+        // Binary search
+        for _ in 0..12 {
+            let mid = (low + high) * 0.5;
+
+            let test_r = if start_valid { r + mid } else { r - mid };
+
+            if is_valid(angle, test_r, stable_value) == start_valid {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+
+        high
+    }
+
     let desired_size = Vec2::splat(ui.spacing().slider_width);
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 
@@ -880,14 +936,28 @@ fn color_slider_2d_radial(
 
     if ui.is_rect_visible(rect) {
         let size = rect.size();
-        let tex_id = ui
-            .id()
-            .with((ui_identifyable_label, (stable_value * 1000.0) as u32));
+        let tex_id = ui.id().with((
+            ui_identifyable_label,
+            smoother_border,
+            (stable_value * 1000.0) as u32,
+        ));
 
         let mut tex = ui
             .data(|d| d.get_temp::<Option<egui::TextureHandle>>(tex_id))
             .unwrap_or(None);
 
+        let tex_upscaled_id = ui.id().with((
+            ui_identifyable_label,
+            "upscaled",
+            smoother_border,
+            (stable_value * 1000.0) as u32,
+        ));
+
+        let mut tex_upscaled = ui
+            .data(|d| d.get_temp::<Option<egui::TextureHandle>>(tex_upscaled_id))
+            .unwrap_or(None);
+
+        let upscale_factor = 4;
         let pixels_w = size.x as usize;
         let pixels_h = size.y as usize;
 
@@ -897,7 +967,8 @@ fn color_slider_2d_radial(
             let start = Instant::now();
 
             let mut pixels = vec![0 as u8; pixels_w * pixels_h * 4];
-            // let mut pixels = Vec::with_capacity(pixels_w * pixels_h * 4);
+            let mut pixels_upscaled =
+                vec![0 as u8; upscale_factor * pixels_w * upscale_factor * pixels_h * 4];
 
             for i_y in 0..pixels_h {
                 for i_x in 0..pixels_w {
@@ -935,9 +1006,198 @@ fn color_slider_2d_radial(
                             pixels[i + 1] = c.g();
                             pixels[i + 2] = c.b();
                             pixels[i + 3] = c.a();
+
+                            // let dist = distance_to_boundary(angle, r, stable_value, 0.01, is_valid);
+                            // let epsilon = 0.02;
+                            // let alpha = smoothstep(0.0, epsilon, dist);
+                            // pixels[i + 3] = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
                         }
                         None => {}
                     };
+                }
+            }
+
+            // Second pass to detect border
+            // for i_y in 1..pixels_h - 1 {
+            //     for i_x in 1..pixels_w - 1 {
+            //         let i = (i_y * pixels_w + i_x) * 4;
+
+            //         // treat alpha == 0 as invalid (your current convention)
+            //         let valid = pixels[i + 3] != 0;
+
+            //         if !valid {
+            //             continue;
+            //         }
+
+            //         let mut neighbor_has_invalid = false;
+
+            //         for dy in -1i32..=1 {
+            //             for dx in -1i32..=1 {
+            //                 if dx == 0 && dy == 0 {
+            //                     continue;
+            //                 }
+
+            //                 let nx = (i_x as i32 + dx) as usize;
+            //                 let ny = (i_y as i32 + dy) as usize;
+
+            //                 let ni = (ny * pixels_w + nx) * 4;
+
+            //                 let neighbor_valid = pixels[ni + 3] != 0;
+
+            //                 if !neighbor_valid {
+            //                     neighbor_has_invalid = true;
+            //                     break;
+            //                 }
+            //             }
+            //             if neighbor_has_invalid {
+            //                 break;
+            //             }
+            //         }
+
+            //         if neighbor_has_invalid {
+            //             let x_normalized = (i_x as f32 / (pixels_w as f32 - 1.0)) * 2.0 - 1.0;
+            //             let y_normalized = (i_y as f32 / (pixels_h as f32 - 1.0)) * 2.0 - 1.0;
+
+            //             let r_squared = x_normalized * x_normalized + y_normalized * y_normalized;
+
+            //             if r_squared > 1.0 {
+            //                 // pixels.extend([0, 0, 0, 0]);
+            //                 continue;
+            //             }
+
+            //             let r = r_squared.sqrt();
+
+            //             let mut angle = (-y_normalized).atan2(x_normalized);
+            //             if angle < 0.0 {
+            //                 angle += std::f32::consts::TAU;
+            //             }
+
+            //             // let angle = angle / std::f32::consts::TAU;
+            //             // let radial_value = 1.0 - r;
+            //             let radians = if invert_radial_value {
+            //                 (1.0 - r).clamp(0.0, 1.0)
+            //             } else {
+            //                 r.clamp(0.0, 1.0)
+            //             };
+
+            //             // pixels[i] = 255; // R
+            //             // pixels[i + 1] = 0; // G
+            //             // pixels[i + 2] = 0; // B
+
+            //             let dist = distance_to_boundary(angle, r, stable_value, 0.01, is_valid);
+            //             let epsilon = 0.2;
+            //             // let epsilon = 1.5 / pixels_w.min(pixels_h) as f32;
+            //             let alpha = smoothstep(0.0, epsilon, dist);
+            //             // pixels[i + 3] = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
+            //             pixels[i + 3] = 160;
+            //             // pixels[i + 3] = 255; // A
+            //         }
+            //     }
+            // }
+            //
+            if smoother_border {
+                let mut is_border = vec![false; pixels_w * pixels_h];
+
+                for y in 1..pixels_h - 1 {
+                    for x in 1..pixels_h - 1 {
+                        let i = (y * pixels_w + x) * 4;
+
+                        let valid = pixels[i + 3] != 0;
+                        if !valid {
+                            continue;
+                        }
+
+                        let mut neighbor_invalid = false;
+
+                        for dy in -3i32..=3 {
+                            for dx in -3i32..=3 {
+                                if dx == 0 && dy == 0 {
+                                    continue;
+                                }
+
+                                let nx = (x as i32 + dx) as usize;
+                                let ny = (y as i32 + dy) as usize;
+
+                                let ni = (ny * pixels_w + nx) * 4;
+
+                                if pixels[ni + 3] == 0 {
+                                    neighbor_invalid = true;
+                                    break;
+                                }
+                            }
+                            if neighbor_invalid {
+                                break;
+                            }
+                        }
+
+                        if neighbor_invalid {
+                            is_border[y * pixels_w + x] = true;
+                            pixels[4 * (y * pixels_w + x) + 3] = 0; // Set alpha to zero such that it does not overpower the more detailed edge
+                        }
+                    }
+                }
+
+                let up_w = pixels_w * upscale_factor;
+                let up_h = pixels_h * upscale_factor;
+
+                // let mut pixels_upscaled = vec![0u8; up_w * up_h * 4];
+
+                for y in 0..pixels_h {
+                    for x in 0..pixels_w {
+                        let coarse_i = y * pixels_w + x;
+                        let border = is_border[coarse_i];
+                        if border == false {
+                            continue;
+                        }
+
+                        // iterate subpixels inside this coarse cell
+                        for sy in 0..upscale_factor {
+                            for sx in 0..upscale_factor {
+                                let ux = x * upscale_factor + sx;
+                                let uy = y * upscale_factor + sy;
+
+                                let i = (uy * up_w + ux) * 4;
+
+                                // map to normalized space using UPSCALED grid
+                                let fx = (ux as f32 + 0.5) / (up_w as f32 - 1.0);
+                                let fy = (uy as f32 + 0.5) / (up_h as f32 - 1.0);
+
+                                let x_normalized = fx * 2.0 - 1.0;
+                                let y_normalized = fy * 2.0 - 1.0;
+
+                                let r2 = x_normalized * x_normalized + y_normalized * y_normalized;
+
+                                if r2 > 1.0 {
+                                    pixels_upscaled[i + 3] = 0;
+                                    continue;
+                                }
+
+                                let r = r2.sqrt();
+
+                                let mut angle = (-y_normalized).atan2(x_normalized);
+                                if angle < 0.0 {
+                                    angle += std::f32::consts::TAU;
+                                }
+
+                                let radius = if invert_radial_value { 1.0 - r } else { r };
+
+                                let color =
+                                    color_at(angle / std::f32::consts::TAU, radius, stable_value);
+
+                                match color {
+                                    Some(c) => {
+                                        pixels_upscaled[i] = c.r();
+                                        pixels_upscaled[i + 1] = c.g();
+                                        pixels_upscaled[i + 2] = c.b();
+                                        pixels_upscaled[i + 3] = c.a();
+                                    }
+                                    None => {
+                                        pixels_upscaled[i + 3] = 0;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -947,11 +1207,23 @@ fn color_slider_2d_radial(
             println!("FPS: {:.1}", fps);
 
             let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
+            let image_upscaled = egui::ColorImage::from_rgba_unmultiplied(
+                [pixels_w * upscale_factor, pixels_h * upscale_factor],
+                &pixels_upscaled,
+            );
 
             if tex.is_none() {
                 tex = Some(ui.ctx().load_texture(
-                    "oklch_radial_fixed",
+                    "oklch_radial_fixed_coarse",
                     image,
+                    egui::TextureOptions::LINEAR,
+                ));
+            }
+
+            if tex_upscaled.is_none() {
+                tex_upscaled = Some(ui.ctx().load_texture(
+                    "oklch_radial_fixed",
+                    image_upscaled,
                     egui::TextureOptions::LINEAR,
                 ));
             }
@@ -959,12 +1231,24 @@ fn color_slider_2d_radial(
             ui.data_mut(|d| {
                 d.insert_temp(tex_id, tex.clone());
             });
+
+            ui.data_mut(|d| {
+                d.insert_temp(tex_upscaled_id, tex_upscaled.clone());
+            });
         }
 
         let tex = tex.as_ref().unwrap();
+        let tex_upscaled = tex_upscaled.as_ref().unwrap();
 
         ui.painter().image(
             tex.id(),
+            rect,
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            Color32::WHITE,
+        );
+
+        ui.painter().image(
+            tex_upscaled.id(),
             rect,
             Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
             Color32::WHITE,
@@ -1033,6 +1317,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
     // let Oklch { l, c, h } = *lch;
 
     let state_id = ui.id().with("oklch_ui_state");
+    let smooth_border_id = ui.id().with("oklch_ui_state_smooth");
 
     // Todo: base default on color value
     // Todo: If the color changed beneath us, reset state to match new color
@@ -1044,7 +1329,10 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
                 h: 0.5,
                 previous_color: lch.clone(),
             });
-
+    let mut smoother_border = ui
+        .data(|d| d.get_temp::<bool>(smooth_border_id))
+        .unwrap_or(false);
+    ui.checkbox(&mut smoother_border, "Smoother borders");
     let l = state.l;
     let c = state.c * 0.325;
     let h = state.h * std::f32::consts::TAU;
@@ -1137,6 +1425,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
                     })
                 },
                 "StableChromeColorPicker",
+                smoother_border,
             );
         }
         OKLabPlotType::StableLightness => {
@@ -1154,6 +1443,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
                     })
                 },
                 "StableLightnessColorPicker",
+                smoother_border,
             );
         }
     }
@@ -1239,6 +1529,10 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
 
     ui.data_mut(|d| {
         d.insert_temp(state_id, state);
+    });
+
+    ui.data_mut(|d| {
+        d.insert_temp(smooth_border_id, smoother_border);
     });
 
     // TODO: Add alpha slider?
