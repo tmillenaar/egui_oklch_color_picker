@@ -15,6 +15,8 @@ use epaint::{
     pos2, vec2,
 };
 
+use std::time::Instant;
+
 fn contrast_color(color: impl Into<Rgba>) -> Color32 {
     if color.into().intensity() < 0.5 {
         Color32::WHITE
@@ -892,22 +894,26 @@ fn color_slider_2d_radial(
         let rebuild = true;
 
         if rebuild {
-            let mut pixels = Vec::with_capacity(pixels_w * pixels_h * 4);
+            let start = Instant::now();
 
-            for y in 0..pixels_h {
-                for x in 0..pixels_w {
-                    let nx = (x as f32 / (pixels_w as f32 - 1.0)) * 2.0 - 1.0;
-                    let ny = (y as f32 / (pixels_h as f32 - 1.0)) * 2.0 - 1.0;
+            let mut pixels = vec![0 as u8; pixels_w * pixels_h * 4];
+            // let mut pixels = Vec::with_capacity(pixels_w * pixels_h * 4);
 
-                    let v = Vec2::new(nx, ny);
-                    let r = v.length();
+            for i_y in 0..pixels_h {
+                for i_x in 0..pixels_w {
+                    let x_normalized = (i_x as f32 / (pixels_w as f32 - 1.0)) * 2.0 - 1.0;
+                    let y_normalized = (i_y as f32 / (pixels_h as f32 - 1.0)) * 2.0 - 1.0;
 
-                    if r > 1.0 {
-                        pixels.extend([0, 0, 0, 0]);
+                    let r_squared = x_normalized * x_normalized + y_normalized * y_normalized;
+
+                    if r_squared > 1.0 {
+                        // pixels.extend([0, 0, 0, 0]);
                         continue;
                     }
 
-                    let mut angle = (-ny).atan2(nx);
+                    let r = r_squared.sqrt();
+
+                    let mut angle = (-y_normalized).atan2(x_normalized);
                     if angle < 0.0 {
                         angle += std::f32::consts::TAU;
                     }
@@ -922,17 +928,23 @@ fn color_slider_2d_radial(
 
                     let color = color_at(angle / std::f32::consts::TAU, radians, stable_value);
 
-                    let (r8, g8, b8, a8) = match color {
-                        Some(c) => (c.r(), c.g(), c.b(), c.a()),
-                        None => (0, 0, 0, 0),
+                    match color {
+                        Some(c) => {
+                            let i = (i_y * pixels_w + i_x) * 4;
+                            pixels[i] = c.r();
+                            pixels[i + 1] = c.g();
+                            pixels[i + 2] = c.b();
+                            pixels[i + 3] = c.a();
+                        }
+                        None => {}
                     };
-
-                    pixels.push(r8);
-                    pixels.push(g8);
-                    pixels.push(b8);
-                    pixels.push(a8);
                 }
             }
+
+            let elapsed = start.elapsed();
+            let fps = 1.0 / elapsed.as_secs_f64();
+
+            println!("FPS: {:.1}", fps);
 
             let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
 
