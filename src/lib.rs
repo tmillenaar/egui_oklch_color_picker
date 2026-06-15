@@ -3,6 +3,7 @@
 // use egui::util::fixed_cache::FixedCache;
 mod conversions;
 use std::f32;
+use std::sync::Arc;
 
 use crate::conversions::*;
 use egui::{
@@ -14,6 +15,7 @@ use epaint::{
     ecolor::{Color32, Hsva, HsvaGamma, Rgba},
     pos2, vec2,
 };
+use egui::cache::*;
 
 use std::time::Instant;
 
@@ -840,6 +842,49 @@ pub fn draw_inward_triangles(
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct RadialCoordinate {
+    radius: f32,
+    angle: f32
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct RadialCoordinateCacheKey {
+    width: usize,
+    height: usize,
+}
+
+#[derive(Default)]
+struct RadialCoordinateCache;
+
+
+impl ComputerMut<RadialCoordinateCacheKey, Arc<[RadialCoordinate]>> for RadialCoordinateCache {
+    fn compute(&mut self, key: RadialCoordinateCacheKey) -> Arc<[RadialCoordinate]> {
+        let pixels_w = key.width;
+        let pixels_h = key.height;
+
+        let mut coords: Vec<RadialCoordinate> = Vec::with_capacity(pixels_w * pixels_h);
+
+        for i_y in 0..pixels_h {
+            for i_x in 0..pixels_w {
+                let x_normalized = (i_x as f32 / (pixels_w as f32 - 1.0)) * 2.0 - 1.0;
+                let y_normalized = (i_y as f32 / (pixels_h as f32 - 1.0)) * 2.0 - 1.0;
+
+                let r_squared = x_normalized * x_normalized + y_normalized * y_normalized;
+                let r = r_squared.sqrt();
+
+                let mut angle = (-y_normalized).atan2(x_normalized);
+                if angle < 0.0 {
+                    angle += std::f32::consts::TAU;
+                }
+
+                coords.push(RadialCoordinate { radius: r, angle });
+            }
+        }
+        Arc::from(coords)
+    }
+}
+
 fn color_slider_2d_radial(
     ui: &mut Ui,
     stable_value: f32,
@@ -880,6 +925,48 @@ fn color_slider_2d_radial(
 
     if ui.is_rect_visible(rect) {
         let size = rect.size();
+
+        // Determine if the size changed
+        let size_changed = {
+            let size_id = ui.id().with("radial_texture_previous_size");
+            let previous_size =
+                ui.data(|d| d.get_temp::<[f32; 2]>(size_id));
+
+            let current_size = [
+                rect.width(),
+                rect.height(),
+            ];
+
+            // Check if floats are reasonably close, possibly overkill.
+            // Maybe an == check would have been sufficient for if the rect
+            // did not change, presumably we would be comparing the exact
+            // same floats. Here I am just being a bit conservative.
+            let size_changed = match previous_size {
+                None => true,
+                Some(prev_size) => {
+                    const EPSILON: f32 = 0.01;
+                    (prev_size[0] - current_size[0]).abs() > EPSILON ||
+                    (prev_size[1] - current_size[1]).abs() > EPSILON
+                }
+            };
+
+            ui.data_mut(|d| {
+                d.insert_temp(size_id, current_size);
+            });
+
+            size_changed
+        };
+
+        // Get the cached radial coordinate map, create if not present
+        let radial_coordinates = ui.ctx().memory_mut(|mem| {
+            mem.caches
+                .cache::<FrameCache<Arc<[RadialCoordinate]>,RadialCoordinateCache>>()
+                .get(RadialCoordinateCacheKey {
+                    width: rect.width() as usize,
+                    height: rect.height() as usize,
+                })
+        });
+
         let tex_id = ui
             .id()
             .with((ui_identifyable_label, (stable_value * 1000.0) as u32));
@@ -897,36 +984,23 @@ fn color_slider_2d_radial(
             let start = Instant::now();
 
             let mut pixels = vec![0 as u8; pixels_w * pixels_h * 4];
-            // let mut pixels = Vec::with_capacity(pixels_w * pixels_h * 4);
 
             for i_y in 0..pixels_h {
                 for i_x in 0..pixels_w {
-                    let x_normalized = (i_x as f32 / (pixels_w as f32 - 1.0)) * 2.0 - 1.0;
-                    let y_normalized = (i_y as f32 / (pixels_h as f32 - 1.0)) * 2.0 - 1.0;
+                    let i = i_y * pixels_w + i_x;
+                    let radial_coord = radial_coordinates[i];
 
-                    let r_squared = x_normalized * x_normalized + y_normalized * y_normalized;
-
-                    if r_squared > 1.0 {
-                        // pixels.extend([0, 0, 0, 0]);
+                    if radial_coord.radius > 1.0 {
                         continue;
                     }
 
-                    let r = r_squared.sqrt();
-
-                    let mut angle = (-y_normalized).atan2(x_normalized);
-                    if angle < 0.0 {
-                        angle += std::f32::consts::TAU;
-                    }
-
-                    // let angle = angle / std::f32::consts::TAU;
-                    // let radial_value = 1.0 - r;
-                    let radians = if invert_radial_value {
-                        (1.0 - r).clamp(0.0, 1.0)
+                    let radius = if invert_radial_value {
+                        (1.0 - radial_coord.radius).clamp(0.0, 1.0)
                     } else {
-                        r.clamp(0.0, 1.0)
+                        radial_coord.radius.clamp(0.0, 1.0)
                     };
 
-                    let color = color_at(angle / std::f32::consts::TAU, radians, stable_value);
+                    let color = color_at(radial_coord.angle / std::f32::consts::TAU, radius, stable_value);
 
                     match color {
                         Some(c) => {
