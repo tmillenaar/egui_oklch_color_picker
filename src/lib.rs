@@ -17,8 +17,6 @@ use epaint::{
 };
 use egui::cache::*;
 
-use std::time::Instant;
-
 fn contrast_color(color: impl Into<Rgba>) -> Color32 {
     if color.into().intensity() < 0.5 {
         Color32::WHITE
@@ -928,7 +926,7 @@ fn color_slider_2d_radial(
 
         // Determine if the size changed
         let size_changed = {
-            let size_id = ui.id().with("radial_texture_previous_size");
+            let size_id = ui.id().with("2d_texture_previous_size");
             let previous_size =
                 ui.data(|d| d.get_temp::<[f32; 2]>(size_id));
 
@@ -957,6 +955,27 @@ fn color_slider_2d_radial(
             size_changed
         };
 
+        let stable_value_changed = {
+            let stable_value_id = ui.id().with((ui_identifyable_label, "stable_value"));
+            let stable_value_prev =
+                ui.data(|d| d.get_temp::<f32>(stable_value_id));
+
+            // Check if floats are reasonably close
+            let size_changed = match stable_value_prev {
+                None => true,
+                Some(prev_value) => {
+                    const EPSILON: f32 = 0.0001;
+                    (stable_value - prev_value).abs() > EPSILON
+                }
+            };
+
+            ui.data_mut(|d| {
+                d.insert_temp(stable_value_id, stable_value);
+            });
+
+            size_changed
+        };
+
         // Get the cached radial coordinate map, create if not present
         let radial_coordinates = ui.ctx().memory_mut(|mem| {
             mem.caches
@@ -969,7 +988,7 @@ fn color_slider_2d_radial(
 
         let tex_id = ui
             .id()
-            .with((ui_identifyable_label, (stable_value * 1000.0) as u32));
+            .with(ui_identifyable_label);
 
         let mut tex = ui
             .data(|d| d.get_temp::<Option<egui::TextureHandle>>(tex_id))
@@ -978,10 +997,11 @@ fn color_slider_2d_radial(
         let pixels_w = size.x as usize;
         let pixels_h = size.y as usize;
 
-        let rebuild = true;
+        // let rebuilde = true;
+        // Rebuild when size changes. The stable value already determines the key
+        let rebuild = tex.is_none() || size_changed ||stable_value_changed;
 
         if rebuild {
-            let start = Instant::now();
 
             let mut pixels = vec![0 as u8; pixels_w * pixels_h * 4];
 
@@ -1015,19 +1035,19 @@ fn color_slider_2d_radial(
                 }
             }
 
-            let elapsed = start.elapsed();
-            let fps = 1.0 / elapsed.as_secs_f64();
-
-            println!("FPS: {:.1}", fps);
-
             let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
 
-            if tex.is_none() {
-                tex = Some(ui.ctx().load_texture(
-                    "oklch_radial_fixed",
-                    image,
-                    egui::TextureOptions::LINEAR,
-                ));
+            match &mut tex {
+                Some(t) => {
+                    t.set(image, egui::TextureOptions::LINEAR);
+                }
+                None => {
+                    tex = Some(ui.ctx().load_texture(
+                        "oklch_radial_fixed",
+                        image,
+                        egui::TextureOptions::LINEAR,
+                    ));
+                }
             }
 
             ui.data_mut(|d| {
