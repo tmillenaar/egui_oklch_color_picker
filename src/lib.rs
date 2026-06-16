@@ -1087,7 +1087,6 @@ impl CachedPicker {
                 } else {
                     polar_coord.radius.clamp(0.0, 1.0)
                 };
-
                 let color = color_at(
                     polar_coord.angle / std::f32::consts::TAU,
                     radius,
@@ -1138,8 +1137,9 @@ impl CachedPicker {
 
     fn nearest_valid_color(
         &self,
-        radial_value: f32,
-        angle_value: f32,
+        angle: f32,
+        radius: f32,
+        invert_radial_value: bool,
         color_at: impl Fn(f32, f32, f32) -> Option<Color32>, // TODO: move to self as function pointer
     ) -> Color32 {
         // Here we could sample the pixels vec, but we can also determine the color
@@ -1149,30 +1149,41 @@ impl CachedPicker {
         let stable_value = self.stable_value_bits as f32 / 10000.;
 
         // If color exists at provided values, return the color
-        let color = color_at(
-            angle_value / std::f32::consts::TAU,
-            radial_value, // FIXME: invert sometimes?
-            stable_value,
-        );
+        let r = if invert_radial_value {
+            (1.0 - radius).clamp(0.0, 1.0)
+        } else {
+            radius.clamp(0.0, 1.0)
+        };
+        let color = color_at(angle / std::f32::consts::TAU, r, stable_value);
         if let Some(color) = color {
             return color;
         }
 
         // If color does not exist, return nearest color
-        let sample_pos = self.nearest_valid_border_coord(radial_value, angle_value);
+        let sample_pos = self.nearest_valid_border_coord(radius, angle);
         let fallback_color = Color32::BLACK; // Take a look at the values where no possibilities left, what is the last color to disappear? Use that!
         let color = match sample_pos {
             None => fallback_color,
             Some(sample_pos) => {
+                dbg!(sample_pos);
                 let polar_coord = pixel_to_polar(
                     sample_pos.x,
                     sample_pos.y,
                     self.size.x as usize,
                     self.size.y as usize,
                 );
+                let radius = if invert_radial_value {
+                    (1.0 - polar_coord.radius).clamp(0.0, 1.0)
+                } else {
+                    polar_coord.radius.clamp(0.0, 1.0)
+                };
+
+                dbg!(polar_coord.angle / std::f32::consts::TAU);
+                dbg!(radius);
                 color_at(
+                    // polar_coord.angle / std::f32::consts::TAU,
                     polar_coord.angle / std::f32::consts::TAU,
-                    polar_coord.radius,
+                    radius,
                     stable_value,
                 )
                 .unwrap_or(fallback_color)
@@ -1620,19 +1631,17 @@ fn color_slider_2d_radial(
         //     );
         // }
         let color = color_at(angle / std::f32::consts::TAU, *radial_value, stable_value);
-        let indicator_color = match color {
-            None => Color32::RED,
-            // Some(_) => Color32::WHITE,
-            Some(c) => c,
+        let (indicator_color, marker_angle) = match color {
+            None => (Color32::WHITE, 0.),
+            Some(c) => (c, 45.),
         };
         draw_inward_triangles(
             ui.painter(),
             Pos2::new(x, y),
-            4.0,  // radius
-            4.0,  // size
-            4,    // count
-            45.0, // radial-offset
-            // Color32::WHITE,
+            4.0,          // radius
+            4.0,          // size
+            4,            // count
+            marker_angle, // radial-offset
             indicator_color,
             Stroke {
                 width: 0.5,
@@ -1643,35 +1652,16 @@ fn color_slider_2d_radial(
         // Draw indicator at loction of fallback color
         if color.is_none() {
             let fallback_color_pos = picker_info.nearest_valid_border_coord(r, angle);
-            if fallback_color_pos.is_none() {
-                println!("NO COLOR BUT ALSO NO FALLBACK POS");
-            } else {
-                println!("NO COLOR");
-            };
-
+            let color = picker_info.nearest_valid_color(angle, r, invert_radial_value, &color_at);
             if let Some(pos) = fallback_color_pos {
-                println!("ALSO NO FALLBACK POS");
-
-                // TODO: Figure out how to convert
-                // let polar_coord = pixel_to_polar(pos.x, pos.y, size.x as usize, size.y as usize);
-                // let x = ui_center.x + polar_coord.angle.cos() * r * polar_coord.radius;
-                // let y = ui_center.y - polar_coord.angle.sin() * r * polar_coord.radius;
-                // let (start_x, start_y) = polar_to_pixel(
-                //     *angle_value,
-                //     *radial_value,
-                //     size.x as usize,
-                //     size.y as usize,
-                // );
-                // let diff_x = pos.x - start_x;
-                // let diff_y = pos.y - start_y;
                 draw_inward_triangles(
                     ui.painter(),
                     pos + rect.min.to_vec2(),
-                    4.0, // radius
-                    4.0, // size
-                    4,   // count
-                    0.0, // radial-offset
-                    Color32::WHITE,
+                    4.0,  // radius
+                    4.0,  // size
+                    4,    // count
+                    45.0, // radial-offset
+                    color,
                     Stroke {
                         width: 0.5,
                         color: Color32::BLACK,
