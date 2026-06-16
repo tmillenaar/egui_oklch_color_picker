@@ -1,6 +1,8 @@
 use eframe::egui;
 use egui_oklab::{Alpha, color_edit_button_oklcha};
 
+use std::time::Instant;
+
 struct MyApp {
     color: egui::Color32,
     color_reference: egui::Color32,
@@ -17,6 +19,7 @@ impl Default for MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let frame_start = Instant::now();
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("egui Color Picker");
 
@@ -36,6 +39,9 @@ impl eframe::App for MyApp {
 
             ui.painter().rect_filled(rect, 5.0, self.color);
         });
+        let frame_time = frame_start.elapsed().as_secs_f64();
+        let fps = 1.0 / frame_time;
+        println!("FPS: {:.1}", fps);
     }
 }
 

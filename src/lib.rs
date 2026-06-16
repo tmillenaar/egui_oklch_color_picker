@@ -6,6 +6,7 @@ use std::f32;
 use std::sync::Arc;
 
 use crate::conversions::*;
+use egui::cache::*;
 use egui::{
     Context, DragValue, Id, Painter, Popup, PopupCloseBehavior, Pos2, Response, Sense,
     TextureHandle, Ui, Widget as _, WidgetInfo, WidgetType, epaint, lerp, remap_clamp,
@@ -15,7 +16,6 @@ use epaint::{
     ecolor::{Color32, Hsva, HsvaGamma, Rgba},
     pos2, vec2,
 };
-use egui::cache::*;
 
 fn contrast_color(color: impl Into<Rgba>) -> Color32 {
     if color.into().intensity() < 0.5 {
@@ -843,78 +843,183 @@ pub fn draw_inward_triangles(
 #[derive(Clone, Copy, Debug)]
 struct RadialCoordinate {
     radius: f32,
-    angle: f32
+    angle: f32,
 }
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
-struct RadialCoordinateCacheKey {
-    width: usize,
-    height: usize,
+// #[derive(Clone, Copy, Hash, PartialEq, Eq)]
+// struct RadialCoordinateCacheKey {
+//     width: usize,
+//     height: usize,
+// }
+
+// #[derive(Default)]
+// struct RadialCoordinateCache;
+
+// impl ComputerMut<RadialCoordinateCacheKey, Arc<[RadialCoordinate]>> for RadialCoordinateCache {
+//     fn compute(&mut self, key: RadialCoordinateCacheKey) -> Arc<[RadialCoordinate]> {
+//         let pixels_w = key.width;
+//         let pixels_h = key.height;
+
+//         let mut coords: Vec<RadialCoordinate> = Vec::with_capacity(pixels_w * pixels_h);
+
+//         let radius_px = pixels_w.min(pixels_h) as f32 * 0.5;
+//         let cx = pixels_w as f32 * 0.5;
+//         let cy = pixels_h as f32 * 0.5;
+//         for i_y in 0..pixels_h {
+//             for i_x in 0..pixels_w {
+//                 let dx = (i_x as f32 + 0.5) - cx;
+//                 let dy = (i_y as f32 + 0.5) - cy;
+
+//                 let x_normalized = dx / radius_px;
+//                 let y_normalized = dy / radius_px;
+
+//                 let r_squared = x_normalized * x_normalized + y_normalized * y_normalized;
+//                 let r = r_squared.sqrt();
+
+//                 let mut angle = (-y_normalized).atan2(x_normalized);
+//                 if angle < 0.0 {
+//                     angle += std::f32::consts::TAU;
+//                 }
+
+//                 coords.push(RadialCoordinate { radius: r, angle });
+//             }
+//         }
+//         Arc::from(coords)
+//     }
+// }
+
+#[derive(Clone)]
+struct CachedPicker {
+    stable_value_bits: u32,
+    size: Vec2,
+    texture: egui::TextureHandle,
+    polar_coordinates: Arc<[RadialCoordinate]>,
+    border_positions: Arc<[Pos2]>,
 }
 
-#[derive(Default)]
-struct RadialCoordinateCache;
+impl CachedPicker {
+    fn new(
+        ui: &mut egui::Ui,
+        size: Vec2,
+        stable_value: f32,
+        invert_radial_value: bool,
+        color_at: impl Fn(f32, f32, f32) -> Option<Color32>,
+    ) -> CachedPicker {
+        let pixels_w = size.x as usize;
+        let pixels_h = size.y as usize;
+        let polar_coordinates = CachedPicker::calculate_polar_coordinates(size);
+        let pixels = CachedPicker::calculate_color_per_pixel(
+            &polar_coordinates,
+            &size,
+            stable_value,
+            invert_radial_value,
+            color_at,
+        );
+        let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
+        let texture =
+            ui.ctx()
+                .load_texture("oklch_radial_fixed", image, egui::TextureOptions::LINEAR);
+        let border_positions = CachedPicker::calculate_border_from_pixels(size, &pixels);
+        CachedPicker {
+            stable_value_bits: (stable_value * 10000.) as u32,
+            size: size,
+            texture: texture,
+            polar_coordinates: Arc::from(polar_coordinates),
+            border_positions: Arc::from(border_positions),
+        }
+    }
 
+    fn update_polar_coordinates(&mut self, size: Vec2) {
+        let coords = CachedPicker::calculate_polar_coordinates(size);
+        self.polar_coordinates = Arc::from(coords);
+    }
 
-impl ComputerMut<RadialCoordinateCacheKey, Arc<[RadialCoordinate]>> for RadialCoordinateCache {
-    fn compute(&mut self, key: RadialCoordinateCacheKey) -> Arc<[RadialCoordinate]> {
-        let pixels_w = key.width;
-        let pixels_h = key.height;
+    fn update_pixel_values_and_border_positions(
+        &mut self,
+        stable_value: f32,
+        invert_radial_value: bool,
+        color_at: impl Fn(f32, f32, f32) -> Option<Color32>,
+    ) {
+        let pixels_w = self.size.x as usize;
+        let pixels_h = self.size.y as usize;
+        let polar_coordinates = self.polar_coordinates.clone();
+        let mut pixels = CachedPicker::calculate_color_per_pixel(
+            &polar_coordinates,
+            &self.size,
+            stable_value,
+            invert_radial_value,
+            color_at,
+        );
 
+        let border_positions = CachedPicker::calculate_border_from_pixels(self.size, &pixels);
+        // Color border white
+        for pos in border_positions.clone() {
+            // let i = (pos.y * pixels_w + pos.x) * 4;
+            let i = (pos.y as usize * pixels_w + pos.x as usize) * 4;
+            pixels[i] = 255;
+            pixels[i + 1] = 255;
+            pixels[i + 2] = 255;
+            pixels[i + 3] = 255;
+        }
+        self.border_positions = Arc::from(border_positions);
+
+        let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
+        self.texture.set(image, egui::TextureOptions::LINEAR);
+        // let fallback = nearest_valid_coord(
+        //     &pixels,
+        //     pixels_w,
+        //     pixels_h,
+        //     sample_radius,
+        //     *angle_value * std::f32::consts::TAU,
+        // );
+        // let fallback = self.nearest_valid_border_coord(radial_value, angle_value);
+        // if let Some(pos) = fallback {
+        //     // let i = (pos.y * pixels_w + pos.x) * 4;
+        //     let i = (pos.x as usize * size.x + pos.y as usize) * 4;
+        //     pixels[i] = 255;
+        //     pixels[i + 1] = 0;
+        //     pixels[i + 2] = 0;
+        //     pixels[i + 3] = 255;
+        // }
+    }
+
+    fn calculate_polar_coordinates(size: Vec2) -> Vec<RadialCoordinate> {
+        let pixels_w = size.x as usize;
+        let pixels_h = size.y as usize;
         let mut coords: Vec<RadialCoordinate> = Vec::with_capacity(pixels_w * pixels_h);
 
-        let radius_px = pixels_w.min(pixels_h) as f32 * 0.5;
-        let cx = pixels_w as f32 * 0.5;
-        let cy = pixels_h as f32 * 0.5;
+        // let radius_px = pixels_w.min(pixels_h) as f32 * 0.5;
+        // let cx = pixels_w as f32 * 0.5;
+        // let cy = pixels_h as f32 * 0.5;
         for i_y in 0..pixels_h {
             for i_x in 0..pixels_w {
-                let dx = (i_x as f32 + 0.5) - cx;
-                let dy = (i_y as f32 + 0.5) - cy;
+                let polar_coord = pixel_to_polar(i_x as f32, i_y as f32, pixels_w, pixels_h);
+                // let dx = (i_x as f32 + 0.5) - cx;
+                // let dy = (i_y as f32 + 0.5) - cy;
 
-                let x_normalized = dx / radius_px;
-                let y_normalized = dy / radius_px;
+                // let x_normalized = dx / radius_px;
+                // let y_normalized = dy / radius_px;
 
-                let r_squared = x_normalized * x_normalized + y_normalized * y_normalized;
-                let r = r_squared.sqrt();
+                // let r_squared = x_normalized * x_normalized + y_normalized * y_normalized;
+                // let r = r_squared.sqrt();
 
-                let mut angle = (-y_normalized).atan2(x_normalized);
-                if angle < 0.0 {
-                    angle += std::f32::consts::TAU;
-                }
-
-                coords.push(RadialCoordinate { radius: r, angle });
+                // let mut angle = (-y_normalized).atan2(x_normalized);
+                // if angle < 0.0 {
+                //     angle += std::f32::consts::TAU;
+                // }
+                // let polar_coord = RadialCoordinate { radius: r, angle };
+                coords.push(polar_coord);
             }
         }
-        Arc::from(coords)
+        coords
     }
-}
 
-#[derive(Clone, Copy, Hash, PartialEq, Eq)]
-struct RadialBorderCoordinateCacheKey {
-    width: usize,
-    height: usize,
-    stable_value: u32,
-    ui_identifyable_label: &str,
-}
-
-#[derive(Default)]
-struct RadialBorderCoordinateCache;
-
-
-impl ComputerMut<RadialBorderCoordinateCacheKey, Arc<[RadialCoordinate]>> for RadialBorderCoordinateCache {
-    fn compute(&mut self, key: RadialBorderCoordinateCacheKey) -> Arc<[RadialCoordinate]> {
-        let pixels_w = key.width;
-        let pixels_h = key.height;
-        let stable_value = key.stable_value as f32 / 10000.;
-
-        // TIMO LEFT HERE:
-        // I somehow need to have access to pixels. This is stored as tex handle,
-        // not as vec. I can try to also store a vec, but even then I'd need to access
-        // the cache. Maybe consider a OnceCell or other global?
-
+    fn calculate_border_from_pixels(size: Vec2, pixels: &Vec<u8>) -> Vec<Pos2> {
+        let pixels_w = size.x as usize;
+        let pixels_h = size.y as usize;
         let mut border_positions = Vec::new();
         for y in 1..pixels_h - 1 {
-            for x in 1..pixels_h - 1 {
+            for x in 1..pixels_w - 1 {
                 let i = (y * pixels_w + x) * 4;
 
                 let valid = pixels[i + 3] != 0;
@@ -946,20 +1051,202 @@ impl ComputerMut<RadialBorderCoordinateCacheKey, Arc<[RadialCoordinate]>> for Ra
                 }
 
                 if neighbor_invalid {
-                    border_positions.push((x,y));
+                    border_positions.push(Pos2 {
+                        x: x as f32,
+                        y: y as f32,
+                    });
                 }
             }
         }
-        Arc::from(border_positions)
+        border_positions
+    }
+
+    fn calculate_color_per_pixel(
+        polar_coordinates: &[RadialCoordinate],
+        size: &Vec2,
+        stable_value: f32,
+        invert_radial_value: bool,
+        color_at: impl Fn(f32, f32, f32) -> Option<Color32>,
+    ) -> Vec<u8> {
+        let pixels_w = size.x as usize;
+        let pixels_h = size.y as usize;
+
+        let mut pixels = vec![0 as u8; pixels_w * pixels_h * 4];
+
+        for i_y in 0..pixels_h {
+            for i_x in 0..pixels_w {
+                let i = i_y * pixels_w + i_x;
+                let polar_coord = polar_coordinates[i];
+
+                if polar_coord.radius > 1.0 {
+                    continue;
+                }
+
+                let radius = if invert_radial_value {
+                    (1.0 - polar_coord.radius).clamp(0.0, 1.0)
+                } else {
+                    polar_coord.radius.clamp(0.0, 1.0)
+                };
+
+                let color = color_at(
+                    polar_coord.angle / std::f32::consts::TAU,
+                    radius,
+                    stable_value,
+                );
+
+                match color {
+                    Some(c) => {
+                        let i = (i_y * pixels_w + i_x) * 4;
+                        pixels[i] = c.r();
+                        pixels[i + 1] = c.g();
+                        pixels[i + 2] = c.b();
+                        pixels[i + 3] = c.a();
+                    }
+                    None => {}
+                };
+            }
+        }
+        pixels
+    }
+
+    fn nearest_valid_border_coord(&self, radial_value: f32, angle_value: f32) -> Option<Pos2> {
+        let (start_x, start_y) = polar_to_pixel(
+            angle_value,
+            radial_value,
+            self.size.x as usize,
+            self.size.y as usize,
+        );
+        let mut min_distance = f32::MAX;
+        let mut min_distance_i = 0;
+        let mut found_nothing = true;
+        let border_positions = self.border_positions.clone();
+        for (i, border_coord) in border_positions.iter().enumerate() {
+            let distance =
+                ((start_x - border_coord.x).powi(2) + (start_y - border_coord.y).powi(2)).sqrt();
+            if distance < min_distance {
+                min_distance_i = i;
+                min_distance = distance;
+                found_nothing = false;
+            }
+        }
+        if found_nothing {
+            return None;
+        } else {
+            return Some(border_positions[min_distance_i]);
+        }
+    }
+
+    fn nearest_valid_color(
+        &self,
+        radial_value: f32,
+        angle_value: f32,
+        color_at: impl Fn(f32, f32, f32) -> Option<Color32>, // TODO: move to self as function pointer
+    ) -> Color32 {
+        // Here we could sample the pixels vec, but we can also determine the color
+        // based on coordinates. This makes the function less pleasant to use, as we
+        // have to supply the color_at closure, but we would then not need to save
+        // a copy of the texture in RAM.
+        let stable_value = self.stable_value_bits as f32 / 10000.;
+
+        // If color exists at provided values, return the color
+        let color = color_at(
+            angle_value / std::f32::consts::TAU,
+            radial_value, // FIXME: invert sometimes?
+            stable_value,
+        );
+        if let Some(color) = color {
+            return color;
+        }
+
+        // If color does not exist, return nearest color
+        let sample_pos = self.nearest_valid_border_coord(radial_value, angle_value);
+        let fallback_color = Color32::BLACK; // Take a look at the values where no possibilities left, what is the last color to disappear? Use that!
+        let color = match sample_pos {
+            None => fallback_color,
+            Some(sample_pos) => {
+                let polar_coord = pixel_to_polar(
+                    sample_pos.x,
+                    sample_pos.y,
+                    self.size.x as usize,
+                    self.size.y as usize,
+                );
+                color_at(
+                    polar_coord.angle / std::f32::consts::TAU,
+                    polar_coord.radius,
+                    stable_value,
+                )
+                .unwrap_or(fallback_color)
+            }
+        };
+        color
     }
 }
 
-pub fn polar_to_pixel(
-    angle: f32,
-    radius: f32,
-    width: usize,
-    height: usize,
-) -> (f32, f32) {
+// #[derive(Clone, Copy, Hash, PartialEq, Eq)]
+// struct RadialBorderCoordinateCacheKey {
+//     width: usize,
+//     height: usize,
+//     stable_value: u32,
+//     ui_identifyable_label: &str,
+// }
+
+// #[derive(Default)]
+// struct RadialBorderCoordinateCache;
+
+// impl ComputerMut<RadialBorderCoordinateCacheKey, Arc<[RadialCoordinate]>> for RadialBorderCoordinateCache {
+//     fn compute(&mut self, key: RadialBorderCoordinateCacheKey) -> Arc<[RadialCoordinate]> {
+//         let pixels_w = key.width;
+//         let pixels_h = key.height;
+//         let stable_value = key.stable_value as f32 / 10000.;
+
+//         // TIMO LEFT HERE:
+//         // I somehow need to have access to pixels. This is stored as tex handle,
+//         // not as vec. I can try to also store a vec, but even then I'd need to access
+//         // the cache. Maybe consider a OnceCell or other global?
+
+//         let mut border_positions = Vec::new();
+//         for y in 1..pixels_h - 1 {
+//             for x in 1..pixels_h - 1 {
+//                 let i = (y * pixels_w + x) * 4;
+
+//                 let valid = pixels[i + 3] != 0;
+//                 if !valid {
+//                     continue;
+//                 }
+
+//                 let mut neighbor_invalid = false;
+
+//                 for dy in -1i32..=1 {
+//                     for dx in -1i32..=1 {
+//                         if dx == 0 && dy == 0 {
+//                             continue;
+//                         }
+
+//                         let nx = (x as i32 + dx) as usize;
+//                         let ny = (y as i32 + dy) as usize;
+
+//                         let ni = (ny * pixels_w + nx) * 4;
+
+//                         if pixels[ni + 3] == 0 {
+//                             neighbor_invalid = true;
+//                             break;
+//                         }
+//                     }
+//                     if neighbor_invalid {
+//                         break;
+//                     }
+//                 }
+
+//                 if neighbor_invalid {
+//                     border_positions.push((x,y));
+//                 }
+//             }
+//         }
+//         Arc::from(border_positions)
+//     }
+// }
+
+pub fn polar_to_pixel(angle: f32, radius: f32, width: usize, height: usize) -> (f32, f32) {
     let radius_px = width.min(height) as f32 * 0.5;
     let cx = width as f32 * 0.5;
     let cy = height as f32 * 0.5;
@@ -976,6 +1263,28 @@ pub fn polar_to_pixel(
     let y = dy + cy - 0.5;
 
     (x, y)
+}
+
+pub fn pixel_to_polar(x: f32, y: f32, width: usize, height: usize) -> RadialCoordinate {
+    let radius_px = width.min(height) as f32 * 0.5;
+    let cx = width as f32 * 0.5;
+    let cy = height as f32 * 0.5;
+
+    let dx = (x + 0.5) - cx;
+    let dy = (y + 0.5) - cy;
+
+    let x_normalized = dx / radius_px;
+    let y_normalized = dy / radius_px;
+
+    let r_squared = x_normalized * x_normalized + y_normalized * y_normalized;
+    let r = r_squared.sqrt();
+
+    let mut angle = (-y_normalized).atan2(x_normalized);
+    if angle < 0.0 {
+        angle += std::f32::consts::TAU;
+    }
+
+    RadialCoordinate { radius: r, angle }
 }
 
 // pub fn nearest_lch_color(
@@ -1046,16 +1355,13 @@ pub fn nearest_valid_coord(
     radial_value: f32,
     angle_value: f32,
 ) -> Option<Pos> {
-
     let (start_x, start_y) = polar_to_pixel(angle_value, radial_value, width, height);
     let start_x = start_x as usize;
     let start_y = start_y as usize;
 
     let idx = |x: usize, y: usize| (y * width + x) * 4;
 
-    let is_valid = |x: usize, y: usize| -> bool {
-        pixels[idx(x, y) + 3] != 0
-    };
+    let is_valid = |x: usize, y: usize| -> bool { pixels[idx(x, y) + 3] != 0 };
 
     let start_x = start_x.min(width).max(0);
     let start_y = start_y.min(height).max(0);
@@ -1169,258 +1475,93 @@ fn color_slider_2d_radial(
     if ui.is_rect_visible(rect) {
         let size = rect.size();
 
-        // Determine if the size changed
-        let size_changed = {
-            let size_id = ui.id().with("2d_texture_previous_size");
-            let previous_size =
-                ui.data(|d| d.get_temp::<[f32; 2]>(size_id));
-
-            let current_size = [
-                rect.width(),
-                rect.height(),
-            ];
-
-            // Check if floats are reasonably close, possibly overkill.
-            // Maybe an == check would have been sufficient for if the rect
-            // did not change, presumably we would be comparing the exact
-            // same floats. Here I am just being a bit conservative.
-            let size_changed = match previous_size {
-                None => true,
-                Some(prev_size) => {
-                    const EPSILON: f32 = 0.01;
-                    (prev_size[0] - current_size[0]).abs() > EPSILON ||
-                    (prev_size[1] - current_size[1]).abs() > EPSILON
-                }
-            };
-
-            ui.data_mut(|d| {
-                d.insert_temp(size_id, current_size);
-            });
-
-            size_changed
-        };
-
-        let stable_value_changed = {
-            let stable_value_id = ui.id().with((ui_identifyable_label, "stable_value"));
-            let stable_value_prev =
-                ui.data(|d| d.get_temp::<f32>(stable_value_id));
-
-            // Check if floats are reasonably close
-            let size_changed = match stable_value_prev {
-                None => true,
-                Some(prev_value) => {
-                    const EPSILON: f32 = 0.0001;
-                    (stable_value - prev_value).abs() > EPSILON
-                }
-            };
-
-            ui.data_mut(|d| {
-                d.insert_temp(stable_value_id, stable_value);
-            });
-
-            size_changed
-        };
-
-        // Get the cached radial coordinate map, create if not present
-        let radial_coordinates = ui.ctx().memory_mut(|mem| {
-            mem.caches
-                .cache::<FrameCache<Arc<[RadialCoordinate]>,RadialCoordinateCache>>()
-                .get(RadialCoordinateCacheKey {
-                    width: rect.width() as usize,
-                    height: rect.height() as usize,
-                })
-        });
-
-        let tex_id = ui
-            .id()
-            .with(ui_identifyable_label);
-
-        let mut tex = ui
-            .data(|d| d.get_temp::<Option<egui::TextureHandle>>(tex_id))
+        let picker_id = ui.id().with(ui_identifyable_label);
+        let mut picker_cache = ui
+            .data(|d| d.get_temp::<Option<CachedPicker>>(picker_id))
             .unwrap_or(None);
 
-        let pixels_w = size.x as usize;
-        let pixels_h = size.y as usize;
+        let mut picker_info = match picker_cache {
+            None => CachedPicker::new(ui, size, stable_value, invert_radial_value, &color_at),
+            Some(picker_info) => picker_info,
+        };
 
-        // let rebuilde = true;
-        // Rebuild when size changes. The stable value already determines the key
-        // let rebuild = tex.is_none() || size_changed ||stable_value_changed;
-        let rebuild = true;
-        // let obtained_color_pos = if rebuild {
-
-            let mut pixels = vec![0 as u8; pixels_w * pixels_h * 4];
-
-            for i_y in 0..pixels_h {
-                for i_x in 0..pixels_w {
-                    let i = i_y * pixels_w + i_x;
-                    let radial_coord = radial_coordinates[i];
-
-                    if radial_coord.radius > 1.0 {
-                        continue;
-                    }
-
-                    let radius = if invert_radial_value {
-                        (1.0 - radial_coord.radius).clamp(0.0, 1.0)
-                    } else {
-                        radial_coord.radius.clamp(0.0, 1.0)
-                    };
-
-                    let color = color_at(radial_coord.angle / std::f32::consts::TAU, radius, stable_value);
-
-                    match color {
-                        Some(c) => {
-                            let i = (i_y * pixels_w + i_x) * 4;
-                            pixels[i] = c.r();
-                            pixels[i + 1] = c.g();
-                            pixels[i + 2] = c.b();
-                            pixels[i + 3] = c.a();
-                        }
-                        None => {}
-                    };
-                }
-            }
-
-            // Find nearest color
-
-            // Find border pixels
-            // nocheckin TODO: cache border pixels
-            // let mut border_positions = Vec::new();
-            // for y in 1..pixels_h - 1 {
-            //     for x in 1..pixels_h - 1 {
-            //         let i = (y * pixels_w + x) * 4;
-
-            //         let valid = pixels[i + 3] != 0;
-            //         if !valid {
-            //             continue;
-            //         }
-
-            //         let mut neighbor_invalid = false;
-
-            //         for dy in -1i32..=1 {
-            //             for dx in -1i32..=1 {
-            //                 if dx == 0 && dy == 0 {
-            //                     continue;
-            //                 }
-
-            //                 let nx = (x as i32 + dx) as usize;
-            //                 let ny = (y as i32 + dy) as usize;
-
-            //                 let ni = (ny * pixels_w + nx) * 4;
-
-            //                 if pixels[ni + 3] == 0 {
-            //                     neighbor_invalid = true;
-            //                     break;
-            //                 }
-            //             }
-            //             if neighbor_invalid {
-            //                 break;
-            //             }
-            //         }
-
-            //         if neighbor_invalid {
-            //             border_positions.push((x,y));
-            //         }
-            //     }
-            // }
-
-            fn nearest_valid_border_coord(
-                width: usize,
-                height: usize,
-                radial_value: f32,
-                angle_value: f32,
-                border_positions: Vec<(usize, usize)>,
-            ) -> Option<(usize, usize)> {
-                let (start_x, start_y) = polar_to_pixel(angle_value, radial_value, width, height);
-                let mut min_distance = f32::MAX;
-                let mut min_distance_i = 0;
-                let mut found_nothing = true;
-                for (i, border_coord) in border_positions.iter().enumerate() {
-                    let border_pos_x = border_coord.0 as f32;
-                    let border_pos_y = border_coord.1 as f32;
-                    let distance = ((start_x - border_pos_x).powi(2) + (start_y - border_pos_y).powi(2)).sqrt();
-                    if distance < min_distance {
-                        min_distance_i = i;
-                        min_distance = distance;
-                        found_nothing = false;
-                    }
-                }
-                if found_nothing {
-                    return None;
-                } else {
-                    return Some(border_positions[min_distance_i]);
-                }
-            };
-
-            let sample_radius = if invert_radial_value {
-                (1.0 - *radial_value).clamp(0.0, 1.0)
-            } else {
-                (*radial_value).clamp(0.0, 1.0)
-            };
-
-
-
-            // Color border white
-            // for pos in border_positions.clone() {
-            //     // let i = (pos.y * pixels_w + pos.x) * 4;
-            //     let i = (pos.1 * pixels_w + pos.0) * 4;
-            //     pixels[i] = 255;
-            //     pixels[i+1] = 255;
-            //     pixels[i+2] = 255;
-            //     pixels[i+3] = 255;
-            // }
-            let fallback = nearest_valid_border_coord(
-                pixels_w,
-                pixels_h,
-                sample_radius,
-                *angle_value * std::f32::consts::TAU,
-                border_positions.clone(),
+        let stable_value_bits = (stable_value * 10000.) as u32;
+        let stable_value_changed = picker_info.stable_value_bits != stable_value_bits;
+        let size_changed = picker_info.size != size;
+        if size_changed {
+            println!("SIZE CHANGED!!");
+            picker_info.update_polar_coordinates(size);
+        }
+        if size_changed || stable_value_changed {
+            println!("UPDATING PIXEL VALUES!!");
+            picker_info.update_pixel_values_and_border_positions(
+                stable_value,
+                invert_radial_value,
+                &color_at,
             );
-            // let fallback = nearest_valid_coord(
-            //     &pixels,
-            //     pixels_w,
-            //     pixels_h,
-            //     sample_radius,
-            //     *angle_value * std::f32::consts::TAU,
-            // );
-            if let Some(pos) = fallback {
-                // let i = (pos.y * pixels_w + pos.x) * 4;
-                let i = (pos.1 * pixels_w + pos.0) * 4;
-                pixels[i] = 255;
-                pixels[i+1] = 0;
-                pixels[i+2] = 0;
-                pixels[i+3] = 255;
-            }
+        }
 
-            let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
+        let sample_radius = if invert_radial_value {
+            (1.0 - *radial_value).clamp(0.0, 1.0)
+        } else {
+            (*radial_value).clamp(0.0, 1.0)
+        };
 
-            match &mut tex {
-                Some(t) => {
-                    t.set(image, egui::TextureOptions::LINEAR);
-                }
-                None => {
-                    tex = Some(ui.ctx().load_texture(
-                        "oklch_radial_fixed",
-                        image,
-                        egui::TextureOptions::LINEAR,
-                    ));
-                }
-            }
+        // Color border white
+        // for pos in border_positions.clone() {
+        //     // let i = (pos.y * pixels_w + pos.x) * 4;
+        //     let i = (pos.1 * pixels_w + pos.0) * 4;
+        //     pixels[i] = 255;
+        //     pixels[i+1] = 255;
+        //     pixels[i+2] = 255;
+        //     pixels[i+3] = 255;
+        // }
+        //
 
-            ui.data_mut(|d| {
-                d.insert_temp(tex_id, tex.clone());
-            });
+        // let fallback = nearest_valid_coord(
+        //     &pixels,
+        //     pixels_w,
+        //     pixels_h,
+        //     sample_radius,
+        //     *angle_value * std::f32::consts::TAU,
+        // );
+        // if let Some(pos) = fallback {
+        //     // let i = (pos.y * pixels_w + pos.x) * 4;
+        //     let i = (pos.x as usize * size.x + pos.y as usize) * 4;
+        //     pixels[i] = 255;
+        //     pixels[i + 1] = 0;
+        //     pixels[i + 2] = 0;
+        //     pixels[i + 3] = 255;
+        // }
 
+        // let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
 
+        // match &mut tex {
+        //     Some(t) => {
+        //         t.set(image, egui::TextureOptions::LINEAR);
+        //     }
+        //     None => {
+        //         tex = Some(ui.ctx().load_texture(
+        //             "oklch_radial_fixed",
+        //             image,
+        //             egui::TextureOptions::LINEAR,
+        //         ));
+        //     }
+        // }
 
-            // Some(fallback)
-            // pixels
+        ui.data_mut(|d| {
+            d.insert_temp(picker_id, picker_info.clone());
+        });
+
+        // Some(fallback)
+        // pixels
         // } else {
         //     // Get pixels from cache
         //     None
         // };
         // dbg!(obtained_color_pos);
-        let tex = tex.as_ref().unwrap();
 
+        let tex = picker_info.texture.clone();
         ui.painter().image(
             tex.id(),
             rect,
@@ -1478,20 +1619,68 @@ fn color_slider_2d_radial(
         //         },
         //     );
         // }
-
+        let color = color_at(angle / std::f32::consts::TAU, *radial_value, stable_value);
+        let indicator_color = match color {
+            None => Color32::RED,
+            // Some(_) => Color32::WHITE,
+            Some(c) => c,
+        };
         draw_inward_triangles(
             ui.painter(),
             Pos2::new(x, y),
             4.0,  // radius
             4.0,  // size
             4,    // count
-            0.0, // radial-offset
-            Color32::WHITE,
+            45.0, // radial-offset
+            // Color32::WHITE,
+            indicator_color,
             Stroke {
                 width: 0.5,
                 color: Color32::BLACK,
             },
         );
+
+        // Draw indicator at loction of fallback color
+        if color.is_none() {
+            let fallback_color_pos = picker_info.nearest_valid_border_coord(r, angle);
+            if fallback_color_pos.is_none() {
+                println!("NO COLOR BUT ALSO NO FALLBACK POS");
+            } else {
+                println!("NO COLOR");
+            };
+
+            if let Some(pos) = fallback_color_pos {
+                println!("ALSO NO FALLBACK POS");
+
+                // TODO: Figure out how to convert
+                // let polar_coord = pixel_to_polar(pos.x, pos.y, size.x as usize, size.y as usize);
+                // let x = ui_center.x + polar_coord.angle.cos() * r * polar_coord.radius;
+                // let y = ui_center.y - polar_coord.angle.sin() * r * polar_coord.radius;
+                // let (start_x, start_y) = polar_to_pixel(
+                //     *angle_value,
+                //     *radial_value,
+                //     size.x as usize,
+                //     size.y as usize,
+                // );
+                // let diff_x = pos.x - start_x;
+                // let diff_y = pos.y - start_y;
+                draw_inward_triangles(
+                    ui.painter(),
+                    pos + rect.min.to_vec2(),
+                    4.0, // radius
+                    4.0, // size
+                    4,   // count
+                    0.0, // radial-offset
+                    Color32::WHITE,
+                    Stroke {
+                        width: 0.5,
+                        color: Color32::BLACK,
+                    },
+                );
+            }
+        } else {
+            println!("FOUND COLOR");
+        }
     }
 
     if response.is_pointer_button_down_on() {
