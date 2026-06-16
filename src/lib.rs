@@ -863,10 +863,16 @@ impl ComputerMut<RadialCoordinateCacheKey, Arc<[RadialCoordinate]>> for RadialCo
 
         let mut coords: Vec<RadialCoordinate> = Vec::with_capacity(pixels_w * pixels_h);
 
+        let radius_px = pixels_w.min(pixels_h) as f32 * 0.5;
+        let cx = pixels_w as f32 * 0.5;
+        let cy = pixels_h as f32 * 0.5;
         for i_y in 0..pixels_h {
             for i_x in 0..pixels_w {
-                let x_normalized = (i_x as f32 / (pixels_w as f32 - 1.0)) * 2.0 - 1.0;
-                let y_normalized = (i_y as f32 / (pixels_h as f32 - 1.0)) * 2.0 - 1.0;
+                let dx = (i_x as f32 + 0.5) - cx;
+                let dy = (i_y as f32 + 0.5) - cy;
+
+                let x_normalized = dx / radius_px;
+                let y_normalized = dy / radius_px;
 
                 let r_squared = x_normalized * x_normalized + y_normalized * y_normalized;
                 let r = r_squared.sqrt();
@@ -881,6 +887,245 @@ impl ComputerMut<RadialCoordinateCacheKey, Arc<[RadialCoordinate]>> for RadialCo
         }
         Arc::from(coords)
     }
+}
+
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
+struct RadialBorderCoordinateCacheKey {
+    width: usize,
+    height: usize,
+    stable_value: u32,
+    ui_identifyable_label: &str,
+}
+
+#[derive(Default)]
+struct RadialBorderCoordinateCache;
+
+
+impl ComputerMut<RadialBorderCoordinateCacheKey, Arc<[RadialCoordinate]>> for RadialBorderCoordinateCache {
+    fn compute(&mut self, key: RadialBorderCoordinateCacheKey) -> Arc<[RadialCoordinate]> {
+        let pixels_w = key.width;
+        let pixels_h = key.height;
+        let stable_value = key.stable_value as f32 / 10000.;
+
+        // TIMO LEFT HERE:
+        // I somehow need to have access to pixels. This is stored as tex handle,
+        // not as vec. I can try to also store a vec, but even then I'd need to access
+        // the cache. Maybe consider a OnceCell or other global?
+
+        let mut border_positions = Vec::new();
+        for y in 1..pixels_h - 1 {
+            for x in 1..pixels_h - 1 {
+                let i = (y * pixels_w + x) * 4;
+
+                let valid = pixels[i + 3] != 0;
+                if !valid {
+                    continue;
+                }
+
+                let mut neighbor_invalid = false;
+
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        if dx == 0 && dy == 0 {
+                            continue;
+                        }
+
+                        let nx = (x as i32 + dx) as usize;
+                        let ny = (y as i32 + dy) as usize;
+
+                        let ni = (ny * pixels_w + nx) * 4;
+
+                        if pixels[ni + 3] == 0 {
+                            neighbor_invalid = true;
+                            break;
+                        }
+                    }
+                    if neighbor_invalid {
+                        break;
+                    }
+                }
+
+                if neighbor_invalid {
+                    border_positions.push((x,y));
+                }
+            }
+        }
+        Arc::from(border_positions)
+    }
+}
+
+pub fn polar_to_pixel(
+    angle: f32,
+    radius: f32,
+    width: usize,
+    height: usize,
+) -> (f32, f32) {
+    let radius_px = width.min(height) as f32 * 0.5;
+    let cx = width as f32 * 0.5;
+    let cy = height as f32 * 0.5;
+
+    // inverse normalization
+    let x_norm = radius * angle.cos();
+    let y_norm = -radius * angle.sin();
+
+    let dx = x_norm * radius_px;
+    let dy = y_norm * radius_px;
+
+    // convert back to pixel coordinates
+    let x = dx + cx - 0.5;
+    let y = dy + cy - 0.5;
+
+    (x, y)
+}
+
+// pub fn nearest_lch_color(
+//     pixels: &[u8],
+//     width: usize,
+//     height: usize,
+//     start_x: usize,
+//     start_y: usize,
+//     mut to_lch: impl Fn(usize, usize) -> Oklch,
+// ) -> Option<Oklch> {
+//     // Helper: check if pixel is valid
+//     let is_valid = |x: usize, y: usize| -> bool {
+//         let i = (y * width + x) * 4;
+//         pixels[i + 3] != 0
+//     };
+
+//     // Clamp start position
+//     let start_x = start_x.min(width.saturating_sub(1));
+//     let start_y = start_y.min(height.saturating_sub(1));
+
+//     // If starting point is valid, return immediately
+//     if is_valid(start_x, start_y) {
+//         return Some(to_lch(start_x, start_y));
+//     }
+
+//     // Ring search outward
+//     let max_radius = width.max(height); // Anythin outside r==1 is anyway not valid color space
+
+//     for r in 1..max_radius {
+//         let x0 = start_x.saturating_sub(r);
+//         let x1 = (start_x + r).min(width - 1);
+//         let y0 = start_y.saturating_sub(r);
+//         let y1 = (start_y + r).min(height - 1);
+
+//         // top + bottom edges
+//         for x in x0..=x1 {
+//             if y0 < height && is_valid(x, y0) {
+//                 return Some(to_lch(x, y0));
+//             }
+//             if y1 < height && is_valid(x, y1) {
+//                 return Some(to_lch(x, y1));
+//             }
+//         }
+
+//         // left + right edges (excluding corners already checked)
+//         for y in (y0 + 1)..y1 {
+//             if x0 < width && is_valid(x0, y) {
+//                 return Some(to_lch(x0, y));
+//             }
+//             if x1 < width && is_valid(x1, y) {
+//                 return Some(to_lch(x1, y));
+//             }
+//         }
+//     }
+
+//     None
+// }
+
+struct Pos {
+    x: usize,
+    y: usize,
+}
+
+pub fn nearest_valid_coord(
+    pixels: &[u8],
+    width: usize,
+    height: usize,
+    radial_value: f32,
+    angle_value: f32,
+) -> Option<Pos> {
+
+    let (start_x, start_y) = polar_to_pixel(angle_value, radial_value, width, height);
+    let start_x = start_x as usize;
+    let start_y = start_y as usize;
+
+    let idx = |x: usize, y: usize| (y * width + x) * 4;
+
+    let is_valid = |x: usize, y: usize| -> bool {
+        pixels[idx(x, y) + 3] != 0
+    };
+
+    let start_x = start_x.min(width).max(0);
+    let start_y = start_y.min(height).max(0);
+
+    // early exit
+    if is_valid(start_x, start_y) {
+        return Some(Pos {
+            x: start_x,
+            y: start_y,
+        });
+    }
+
+    // Diagonal distance as max search distance
+    let max_r = (width * width + height * height).isqrt();
+
+    for r in 1..max_r {
+        let x0 = start_x.saturating_sub(r);
+        let x1 = (start_x + r).min(width - 1);
+        let y0 = start_y.saturating_sub(r);
+        let y1 = (start_y + r).min(height - 1);
+
+        // top + bottom edges
+        for x in x0..=x1 {
+            if y0 < height && is_valid(x, y0) {
+                return Some(Pos { x, y: y0 });
+            }
+            if y1 < height && is_valid(x, y1) {
+                return Some(Pos { x, y: y1 });
+            }
+        }
+
+        // left + right edges
+        for y in (y0 + 1)..y1 {
+            if x0 < width && is_valid(x0, y) {
+                return Some(Pos { x: x0, y });
+            }
+            if x1 < width && is_valid(x1, y) {
+                return Some(Pos { x: x1, y });
+            }
+        }
+    }
+
+    None
+}
+
+pub fn tex_coord_to_lch(
+    coord: Pos,
+    width: usize,
+    height: usize,
+    stable_value: f32,
+    invert_radial_value: bool,
+    // your existing mapping function reused here
+    to_lch: impl Fn(f32, f32, f32) -> Option<Oklch>,
+) -> Option<Oklch> {
+    let x = coord.x;
+    let y = coord.y;
+
+    // normalize to 0..1 texture space
+    let u = x as f32 / (width as f32 - 1.0);
+    let v = y as f32 / (height as f32 - 1.0);
+
+    // interpret (u,v) as your 2D parameter space
+    // NOTE: this assumes:
+    // u -> angle
+    // v -> radius (or vice versa depending on your design)
+
+    let angle = u;
+    let radius = if invert_radial_value { 1.0 - v } else { v };
+
+    to_lch(angle, radius, stable_value)
 }
 
 fn color_slider_2d_radial(
@@ -999,9 +1244,9 @@ fn color_slider_2d_radial(
 
         // let rebuilde = true;
         // Rebuild when size changes. The stable value already determines the key
-        let rebuild = tex.is_none() || size_changed ||stable_value_changed;
-
-        if rebuild {
+        // let rebuild = tex.is_none() || size_changed ||stable_value_changed;
+        let rebuild = true;
+        // let obtained_color_pos = if rebuild {
 
             let mut pixels = vec![0 as u8; pixels_w * pixels_h * 4];
 
@@ -1035,6 +1280,117 @@ fn color_slider_2d_radial(
                 }
             }
 
+            // Find nearest color
+
+            // Find border pixels
+            // nocheckin TODO: cache border pixels
+            // let mut border_positions = Vec::new();
+            // for y in 1..pixels_h - 1 {
+            //     for x in 1..pixels_h - 1 {
+            //         let i = (y * pixels_w + x) * 4;
+
+            //         let valid = pixels[i + 3] != 0;
+            //         if !valid {
+            //             continue;
+            //         }
+
+            //         let mut neighbor_invalid = false;
+
+            //         for dy in -1i32..=1 {
+            //             for dx in -1i32..=1 {
+            //                 if dx == 0 && dy == 0 {
+            //                     continue;
+            //                 }
+
+            //                 let nx = (x as i32 + dx) as usize;
+            //                 let ny = (y as i32 + dy) as usize;
+
+            //                 let ni = (ny * pixels_w + nx) * 4;
+
+            //                 if pixels[ni + 3] == 0 {
+            //                     neighbor_invalid = true;
+            //                     break;
+            //                 }
+            //             }
+            //             if neighbor_invalid {
+            //                 break;
+            //             }
+            //         }
+
+            //         if neighbor_invalid {
+            //             border_positions.push((x,y));
+            //         }
+            //     }
+            // }
+
+            fn nearest_valid_border_coord(
+                width: usize,
+                height: usize,
+                radial_value: f32,
+                angle_value: f32,
+                border_positions: Vec<(usize, usize)>,
+            ) -> Option<(usize, usize)> {
+                let (start_x, start_y) = polar_to_pixel(angle_value, radial_value, width, height);
+                let mut min_distance = f32::MAX;
+                let mut min_distance_i = 0;
+                let mut found_nothing = true;
+                for (i, border_coord) in border_positions.iter().enumerate() {
+                    let border_pos_x = border_coord.0 as f32;
+                    let border_pos_y = border_coord.1 as f32;
+                    let distance = ((start_x - border_pos_x).powi(2) + (start_y - border_pos_y).powi(2)).sqrt();
+                    if distance < min_distance {
+                        min_distance_i = i;
+                        min_distance = distance;
+                        found_nothing = false;
+                    }
+                }
+                if found_nothing {
+                    return None;
+                } else {
+                    return Some(border_positions[min_distance_i]);
+                }
+            };
+
+            let sample_radius = if invert_radial_value {
+                (1.0 - *radial_value).clamp(0.0, 1.0)
+            } else {
+                (*radial_value).clamp(0.0, 1.0)
+            };
+
+
+
+            // Color border white
+            // for pos in border_positions.clone() {
+            //     // let i = (pos.y * pixels_w + pos.x) * 4;
+            //     let i = (pos.1 * pixels_w + pos.0) * 4;
+            //     pixels[i] = 255;
+            //     pixels[i+1] = 255;
+            //     pixels[i+2] = 255;
+            //     pixels[i+3] = 255;
+            // }
+            let fallback = nearest_valid_border_coord(
+                pixels_w,
+                pixels_h,
+                sample_radius,
+                *angle_value * std::f32::consts::TAU,
+                border_positions.clone(),
+            );
+            // let fallback = nearest_valid_coord(
+            //     &pixels,
+            //     pixels_w,
+            //     pixels_h,
+            //     sample_radius,
+            //     *angle_value * std::f32::consts::TAU,
+            // );
+            if let Some(pos) = fallback {
+                // let i = (pos.y * pixels_w + pos.x) * 4;
+                let i = (pos.1 * pixels_w + pos.0) * 4;
+                pixels[i] = 255;
+                pixels[i+1] = 0;
+                pixels[i+2] = 0;
+                pixels[i+3] = 255;
+            }
+
             let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
 
             match &mut tex {
@@ -1053,8 +1409,16 @@ fn color_slider_2d_radial(
             ui.data_mut(|d| {
                 d.insert_temp(tex_id, tex.clone());
             });
-        }
 
+
+
+            // Some(fallback)
+            // pixels
+        // } else {
+        //     // Get pixels from cache
+        //     None
+        // };
+        // dbg!(obtained_color_pos);
         let tex = tex.as_ref().unwrap();
 
         ui.painter().image(
@@ -1078,9 +1442,7 @@ fn color_slider_2d_radial(
         ui.painter()
             .rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
 
-        // ----------------------------
-        // Handle (FIXED)
-        // ----------------------------
+        // Handle
         let angle = *angle_value * std::f32::consts::TAU;
 
         let r = if invert_radial_value {
@@ -1092,13 +1454,38 @@ fn color_slider_2d_radial(
         let x = ui_center.x + angle.cos() * r * radius;
         let y = ui_center.y - angle.sin() * r * radius;
 
+        // println!("Attempting to get color at coord: {}, {}", x, y);
+        // let fallback = nearest_valid_coord(
+        //     &pixels,
+        //     pixels_w,
+        //     pixels_h,
+        //     *radial_value,
+        //     *angle_value,
+        // );
+
+        // if let Some(pos) = fallback {
+        //     draw_inward_triangles(
+        //         ui.painter(),
+        //         Pos2::new(pos.x as f32, pos.y as f32),
+        //         4.0,  // radius
+        //         4.0,  // size
+        //         4,    // count
+        //         45.0, // radial-offset
+        //         Color32::WHITE,
+        //         Stroke {
+        //             width: 0.5,
+        //             color: Color32::BLACK,
+        //         },
+        //     );
+        // }
+
         draw_inward_triangles(
             ui.painter(),
             Pos2::new(x, y),
             4.0,  // radius
             4.0,  // size
             4,    // count
-            45.0, // radial-offset
+            0.0, // radial-offset
             Color32::WHITE,
             Stroke {
                 width: 0.5,
