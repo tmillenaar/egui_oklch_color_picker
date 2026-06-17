@@ -1878,19 +1878,40 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
         state.c = chroma_val / 0.325;
     });
 
+    let determine_hue_slider_colors = |h_mut| {
+        let color = try_oklch_to_color32(Oklch {
+            l: l,
+            c: c,
+            h: h_mut * std::f32::consts::TAU,
+        });
+
+        match color {
+            None => {
+                let bg_color = try_oklch_to_color32(Oklch {
+                    l: 0.750,
+                    c: 0.127,
+                    h: h_mut * std::f32::consts::TAU,
+                })
+                .unwrap() // With the chosen l and c, there is always a defined hue
+                .blend(Color32::from_black_alpha(40));
+                Some(Color32::from_rgba_unmultiplied(
+                    bg_color.r(),
+                    bg_color.g(),
+                    bg_color.b(),
+                    210,
+                ))
+            }
+            Some(color) => Some(color),
+        }
+    };
+
     // --- Hue slider ---
     ui.horizontal(|ui| {
         color_slider_1d_grid(
             ui,
             &mut state.h,
             lch.h / std::f32::consts::TAU,
-            |h_mut| {
-                try_oklch_to_color32(Oklch {
-                    l: l,
-                    c: c,
-                    h: h_mut * std::f32::consts::TAU,
-                })
-            },
+            determine_hue_slider_colors,
             &"hue",
         )
         .on_hover_text("Hue");
