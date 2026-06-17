@@ -55,7 +55,17 @@ pub fn linear_srgb_to_srgb(c: LinearSrgb) -> Srgb {
 pub fn srgb_to_linear_srgb(c: Srgb) -> LinearSrgb {
     let linearize = |x: f32| {
         if x >= 0.04045 {
-            ((x + 0.055) / 1.055).powf(2.4)
+            // ((x + 0.055) / 1.055).powf(2.4)
+
+            // TODO: Perf: use linear-srgb create for faster conversions.
+            //       That would probably require a little restructuring as their
+            //       slice methods work on many colors at once.
+
+            // Fast approximation for x^(1/2.4)
+            let x_sqrt = x.sqrt();
+            let x_fourth = x_sqrt.sqrt();
+            let x_eighth = x_fourth.sqrt();
+            0.5851223 * x_sqrt + 0.4204550 * x_fourth - 0.0055773 * x_eighth
         } else {
             x / 12.92
         }
@@ -101,18 +111,23 @@ pub fn oklab_to_linear_srgb(c: Oklab) -> LinearSrgb {
 }
 
 pub fn oklab_to_oklch(c: Oklab) -> Oklch {
+    // Note: Using fast_math::atan2, the maximum absolute error across all f32s is less than 0.0038.
+    //       This is quite fine for the visualization of the color in relation to an angle.
+    //       Since this calculation is in a hot loop, we benefit significantly from the faster atan2.
+    // Invert Y for correct hue rotation direction
     Oklch {
         l: c.l,
         c: c.a.hypot(c.b),
-        h: c.b.atan2(c.a),
+        h: fast_math::atan2(-c.b, c.a),
     }
 }
 
 pub fn oklch_to_oklab(c: Oklch) -> Oklab {
+    let (sin_h, cos_h) = c.h.sin_cos(); // Generates one combined assembly instruction if supported by hardware
     Oklab {
         l: c.l,
-        a: c.c * c.h.cos(),
-        b: c.c * c.h.sin(),
+        a: c.c * cos_h,
+        b: c.c * sin_h,
     }
 }
 

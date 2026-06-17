@@ -1165,7 +1165,6 @@ impl CachedPicker {
         let color = match sample_pos {
             None => fallback_color,
             Some(sample_pos) => {
-                dbg!(sample_pos);
                 let polar_coord = pixel_to_polar(
                     sample_pos.x,
                     sample_pos.y,
@@ -1178,8 +1177,6 @@ impl CachedPicker {
                     polar_coord.radius.clamp(0.0, 1.0)
                 };
 
-                dbg!(polar_coord.angle / std::f32::consts::TAU);
-                dbg!(radius);
                 color_at(
                     // polar_coord.angle / std::f32::consts::TAU,
                     polar_coord.angle / std::f32::consts::TAU,
@@ -1290,7 +1287,11 @@ pub fn pixel_to_polar(x: f32, y: f32, width: usize, height: usize) -> RadialCoor
     let r_squared = x_normalized * x_normalized + y_normalized * y_normalized;
     let r = r_squared.sqrt();
 
-    let mut angle = (-y_normalized).atan2(x_normalized);
+    // Note: Using fast_math::atan2, the maximum absolute error across all f32s is less than 0.0038.
+    //       This is quite fine for the visualization of the color in relation to an angle.
+    //       Since this calculation is in a hot loop, we benefit significantly from the faster atan2.
+    // Invert Y for correct hue rotation direction
+    let mut angle = fast_math::atan2(-y_normalized, x_normalized);
     if angle < 0.0 {
         angle += std::f32::consts::TAU;
     }
@@ -1466,6 +1467,9 @@ fn color_slider_2d_radial(
 
         let r = v.length().clamp(0.0, 1.0);
 
+        // Note: Using fast_math::atan2, the maximum absolute error across all f32s is less than 0.0038.
+        //       This is quite fine for the visualization of the color in relation to an angle.
+        //       Nevertheless, this particualr line is only called once per frame so the normal atan2 is fine
         // Invert Y for correct hue rotation direction
         let angle = (-v.y).atan2(v.x);
 
