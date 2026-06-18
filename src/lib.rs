@@ -959,35 +959,10 @@ impl CachedPicker {
         );
 
         let border_positions = CachedPicker::calculate_border_from_pixels(self.size, &pixels);
-        // Color border white
-        for pos in border_positions.clone() {
-            // let i = (pos.y * pixels_w + pos.x) * 4;
-            let i = (pos.y as usize * pixels_w + pos.x as usize) * 4;
-            pixels[i] = 255;
-            pixels[i + 1] = 255;
-            pixels[i + 2] = 255;
-            pixels[i + 3] = 255;
-        }
         self.border_positions = Arc::from(border_positions);
 
         let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
         self.texture.set(image, egui::TextureOptions::LINEAR);
-        // let fallback = nearest_valid_coord(
-        //     &pixels,
-        //     pixels_w,
-        //     pixels_h,
-        //     sample_radius,
-        //     *angle_value * std::f32::consts::TAU,
-        // );
-        // let fallback = self.nearest_valid_border_coord(radial_value, angle_value);
-        // if let Some(pos) = fallback {
-        //     // let i = (pos.y * pixels_w + pos.x) * 4;
-        //     let i = (pos.x as usize * size.x + pos.y as usize) * 4;
-        //     pixels[i] = 255;
-        //     pixels[i + 1] = 0;
-        //     pixels[i + 2] = 0;
-        //     pixels[i + 3] = 255;
-        // }
     }
 
     fn calculate_polar_coordinates(size: Vec2) -> Vec<RadialCoordinate> {
@@ -1588,11 +1563,11 @@ fn color_slider_2d_radial(
                 draw_inward_triangles(
                     ui.painter(),
                     pos + rect.min.to_vec2(),
-                    4.0,  // radius
-                    4.0,  // size
+                    3.0,  // radius
+                    3.0,  // size
                     4,    // count
                     45.0, // radial-offset
-                    color,
+                    Color32::WHITE,
                     Stroke {
                         width: 0.5,
                         color: Color32::BLACK,
@@ -1712,6 +1687,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
             Color32::CYAN
         }
         OKLabPlotType::StableChroma => {
+            let ui_identifyable_label = "StableChromeColorPicker";
             color_slider_2d_radial(
                 ui,
                 state.c,
@@ -1725,9 +1701,23 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
                         h: angle * std::f32::consts::TAU,
                     })
                 },
-                "StableChromeColorPicker",
+                ui_identifyable_label,
             );
-            Color32::ORANGE
+            let picker_id = ui.id().with(ui_identifyable_label);
+            let picker_info = ui.data(|d| d.get_temp::<CachedPicker>(picker_id).unwrap()); // Has to have been set by color_slider_2d_radial.
+            let picked_color = picker_info.nearest_valid_color(
+                state.h * std::f32::consts::TAU,
+                (1.0 - state.l).clamp(0.0, 1.0),
+                true,
+                |angle, radian, stable| {
+                    oklch_to_color32(Oklch {
+                        l: radian,
+                        c: stable * 0.325,
+                        h: angle * std::f32::consts::TAU,
+                    })
+                },
+            );
+            picked_color
         }
         OKLabPlotType::StableLightness => {
             let ui_identifyable_label = "StableLightnessColorPicker";
@@ -1761,7 +1751,6 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
                 },
             );
             picked_color
-            // *lch = color32_to_oklch(picked_color);
         }
     };
     show_srgba_unmultiplied(ui, new_color.to_array(), current_color_size)
