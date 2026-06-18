@@ -6,6 +6,7 @@ use std::f32;
 use std::sync::Arc;
 
 use crate::conversions::*;
+use egui::Order::Background;
 use egui::cache::*;
 use egui::epaint::RectShape;
 use egui::{
@@ -36,12 +37,11 @@ fn modulus(val: f32, modulus: f32) -> f32 {
     ((val % modulus) + modulus) % modulus
 }
 
-fn background_checkers(painter: &Painter, rect: Rect) {
+fn background_checkers(painter: &Painter, rect: Rect, ny: u32) {
     let rect = rect.shrink(0.5); // Small hack to avoid the checkers from peeking through the sides
 
-    let ny = 4;
-    let dark_color = Color32::from_gray(32);
-    let bright_color = Color32::from_gray(128);
+    let dark_color = Color32::from_gray(80);
+    let bright_color = Color32::from_gray(180);
 
     // Adjust rect size and checker size to match
     let target_checker_size = rect.height() / ny as f32;
@@ -94,7 +94,7 @@ pub fn show_color_at(painter: &Painter, color: Color32, rect: Rect) {
         painter.rect_filled(rect, 0.0, color);
     } else {
         // Transparent: how both the transparent and opaque versions of the color
-        background_checkers(painter, rect);
+        background_checkers(painter, rect, 4);
 
         if color == Color32::TRANSPARENT {
             // There is no opaque version, so just show the background checkers
@@ -121,7 +121,7 @@ fn show_srgba_unmultiplied_at(painter: &Painter, [r, g, b, a]: [u8; 4], rect: Re
     if a == 255 {
         painter.rect_filled(rect, 0.0, Color32::from_rgb(r, g, b));
     } else {
-        background_checkers(painter, rect);
+        background_checkers(painter, rect, 4);
         let left = Rect::from_min_max(rect.left_top(), rect.center_bottom());
         let right = Rect::from_min_max(rect.center_top(), rect.right_bottom());
         painter.rect_filled(left, 0.0, Color32::from_rgba_unmultiplied(r, g, b, a));
@@ -170,7 +170,7 @@ fn color_slider_1d(ui: &mut Ui, value: &mut f32, color_at: impl Fn(f32) -> Color
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact(&response);
 
-        background_checkers(ui.painter(), rect); // for alpha:
+        background_checkers(ui.painter(), rect, 4); // for alpha:
 
         {
             // fill color:
@@ -227,6 +227,7 @@ fn color_slider_1d_grid(
     slider_value_nearest_color: f32,
     nearest_color: Color32,
     color_at: impl Fn(f32) -> (bool, Color32),
+    background_color_at: Option<impl Fn(f32) -> Color32>,
     axis_name: &str,
 ) -> Response {
     let desired_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
@@ -265,7 +266,7 @@ fn color_slider_1d_grid(
         // let rebuild = tex.is_none() || tex.as_ref().unwrap().size() != [nx, ny];
         let rebuild = true;
 
-        background_checkers(ui.painter(), rect);
+        background_checkers(ui.painter(), rect, 4);
 
         if rebuild {
             let mut pixels = Vec::with_capacity(nx * ny * 4);
@@ -286,10 +287,21 @@ fn color_slider_1d_grid(
                         pixels.push(color.b());
                         pixels.push(color.a());
                     } else {
-                        pixels.push(0);
-                        pixels.push(0);
-                        pixels.push(0);
-                        pixels.push(0);
+                        match background_color_at {
+                            None => {
+                                pixels.push(0);
+                                pixels.push(0);
+                                pixels.push(0);
+                                pixels.push(0);
+                            }
+                            Some(ref bg_color_at) => {
+                                let color = bg_color_at(t);
+                                pixels.push(color.r());
+                                pixels.push(color.g());
+                                pixels.push(color.b());
+                                pixels.push(color.a());
+                            }
+                        }
                     };
                 }
             }
@@ -1499,6 +1511,28 @@ fn color_slider_2d_radial(
     }
 
     if ui.is_rect_visible(rect) {
+        // background_checkers(ui.painter(), rect, 50);
+
+        // let bg_color = Color32::from_gray(100);
+        // ui.painter().add(RectShape::new(
+        //     rect,
+        //     0, // corner_radius,
+        //     bg_color,
+        //     Stroke::new(0.0, Color32::TRANSPARENT),
+        //     StrokeKind::Inside,
+        // ));
+        //
+
+        // Radial lines
+        for i in 0..6 {
+            ui.painter().circle(
+                Pos2::new(ui_center.x, ui_center.y),
+                0.5 + 25. * i as f32,
+                Color32::TRANSPARENT,
+                egui::Stroke::new(1., Color32::from_rgba_unmultiplied(200, 200, 200, 100)),
+            );
+        }
+
         let size = rect.size();
 
         let picker_id = ui.id().with(ui_identifyable_label);
@@ -1540,16 +1574,6 @@ fn color_slider_2d_radial(
             Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
             Color32::WHITE,
         );
-
-        // Radial lines
-        for i in 0..6 {
-            ui.painter().circle(
-                Pos2::new(ui_center.x, ui_center.y),
-                0.5 + 25. * i as f32,
-                Color32::TRANSPARENT,
-                egui::Stroke::new(1., Color32::from_rgba_unmultiplied(200, 200, 200, 100)),
-            );
-        }
 
         let visuals = ui.style().interact(&response);
         ui.painter()
@@ -1819,6 +1843,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
             lch.l,
             display_color,
             |l_mut| oklch_to_color32(Oklch { l: l_mut, c, h }),
+            None::<fn(f32) -> Color32>,
             &"lightness",
         )
         .on_hover_text("Lightness");
@@ -1845,6 +1870,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
                     h,
                 })
             },
+            None::<fn(f32) -> Color32>,
             &"chroma",
         )
         .on_hover_text("Chroma");
@@ -1861,28 +1887,15 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
 
     // --- Hue slider ---
     let determine_hue_slider_colors = |h_mut| {
-        let (is_valid, color) = oklch_to_color32(Oklch {
-            l: l,
-            c: c,
+        // Define lightness and chroma that exist for all hues
+        let (_, bg_color) = oklch_to_color32(Oklch {
+            l: 0.750,
+            c: 0.127,
             h: h_mut * std::f32::consts::TAU,
         });
-
-        let color = if !is_valid {
-            let (_, bg_color) = oklch_to_color32(Oklch {
-                l: 0.750,
-                c: 0.127,
-                h: h_mut * std::f32::consts::TAU,
-            });
-            let bg_color = bg_color.blend(Color32::from_black_alpha(40));
-            Color32::from_rgba_unmultiplied(bg_color.r(), bg_color.g(), bg_color.b(), 210)
-        } else {
-            color
-        };
-        // Since we already assign a fallback color here,
-        // we return true indicating the color is valid or
-        // the function this closure is passed to will not
-        // render the fallback color we determined here.
-        (true, color)
+        let bg_color = bg_color.blend(Color32::from_black_alpha(40));
+        let color = Color32::from_rgba_unmultiplied(bg_color.r(), bg_color.g(), bg_color.b(), 210);
+        color
     };
     ui.horizontal(|ui| {
         color_slider_1d_grid(
@@ -1890,7 +1903,14 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
             &mut state.h,
             lch.h / std::f32::consts::TAU,
             display_color,
-            determine_hue_slider_colors,
+            |h_mut| {
+                oklch_to_color32(Oklch {
+                    l: l,
+                    c: c,
+                    h: h_mut * std::f32::consts::TAU,
+                })
+            },
+            Some(determine_hue_slider_colors),
             &"hue",
         )
         .on_hover_text("Hue");
