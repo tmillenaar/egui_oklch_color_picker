@@ -114,10 +114,14 @@ pub fn oklab_to_oklch(c: Oklab) -> Oklch {
     //       This is quite fine for the visualization of the color in relation to an angle.
     //       Since this calculation is in a hot loop, we benefit significantly from the faster atan2.
     // Invert Y for correct hue rotation direction
+    let mut new_hue = fast_math::atan2(c.b, c.a);
+    if new_hue < 0.0 {
+        new_hue += std::f32::consts::TAU;
+    };
     Oklch {
         l: c.l,
         c: c.a.hypot(c.b),
-        h: fast_math::atan2(-c.b, c.a),
+        h: new_hue,
     }
 }
 
@@ -157,7 +161,6 @@ pub fn oklch_to_color32(c: Oklch) -> (bool, crate::Color32) {
 }
 
 pub fn color32_to_oklch(color: crate::Color32) -> Oklch {
-    // let [r, g, b, a] = color.to_srgba_unmultiplied();
     let [r, g, b, a] = color.to_array();
     let linear = srgb_to_linear_srgb(Srgb {
         r: r as f32 / 255.,

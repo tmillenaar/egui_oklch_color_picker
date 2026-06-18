@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use crate::conversions::*;
 use egui::cache::*;
+use egui::epaint::RectShape;
 use egui::{
     Context, DragValue, Id, Painter, Popup, PopupCloseBehavior, Pos2, Response, Sense,
     TextureHandle, Ui, Widget as _, WidgetInfo, WidgetType, epaint, lerp, remap_clamp,
@@ -223,7 +224,8 @@ struct OklchUiState {
 fn color_slider_1d_grid(
     ui: &mut Ui,
     slider_value: &mut f32,
-    color_value_normalized: f32,
+    slider_value_nearest_color: f32,
+    nearest_color: Color32,
     color_at: impl Fn(f32) -> (bool, Color32),
     axis_name: &str,
 ) -> Response {
@@ -326,37 +328,68 @@ fn color_slider_1d_grid(
             .rect_stroke(rect, 0.0, visuals.bg_stroke, StrokeKind::Inside);
 
         // Show current slider location with marker
-        let r = rect.height() / 4.0;
-        let (is_valid, mut picked_color) = color_at(*slider_value);
+
+        // If marker is not at valid color, show where the projected color would be on the slider
+        let x = lerp(rect.left()..=rect.right(), slider_value_nearest_color);
+        let (is_valid, _) = color_at(*slider_value);
         if !is_valid {
-            picked_color = Color32::from_rgba_premultiplied(0, 0, 0, 0);
-        };
+            // let (_, nearest_color) = color_at(slider_value_nearest_color);
+            ui.painter().add(Shape::Rect(RectShape::new(
+                Rect::from_center_size(
+                    Pos2 {
+                        x,
+                        y: rect.center().y,
+                    },
+                    Vec2 {
+                        x: 6.,
+                        y: rect.height(),
+                    },
+                ),
+                0,
+                nearest_color,
+                Stroke::new(visuals.fg_stroke.width, contrast_color(nearest_color)),
+                StrokeKind::Outside,
+            )));
+        }
+        // Show current location with white marker
+        let r = rect.height() / 3.0;
         let x = lerp(rect.left()..=rect.right(), *slider_value);
         ui.painter().add(Shape::convex_polygon(
             vec![
-                pos2(x, rect.center().y),
-                pos2(x + r, rect.bottom()),
-                pos2(x - r, rect.bottom()),
+                pos2(x + r / 2., rect.top() - 2.),
+                pos2(x, rect.top() + r - 2.),
+                pos2(x - r / 2., rect.top() - 2.),
             ],
-            picked_color,
-            Stroke::new(visuals.fg_stroke.width, contrast_color(picked_color)),
+            Color32::WHITE,
+            Stroke::new(visuals.fg_stroke.width, Color32::BLACK),
         ));
-        // Show current color with marker (snap to nearest existing value)
-        let x = lerp(
-            rect.left()..=rect.right(),
-            // color_value_normalized * (rect.right() - rect.left()),
-            *slider_value * (rect.right() - rect.left()),
-            // color_value_normalized,
-        );
         ui.painter().add(Shape::convex_polygon(
             vec![
-                pos2(x, rect.center().y),
-                pos2(x + r, rect.bottom()),
-                pos2(x - r, rect.bottom()),
+                pos2(x + r / 2., rect.bottom() + 2.),
+                pos2(x, rect.bottom() - r + 2.),
+                pos2(x - r / 2., rect.bottom() + 2.),
             ],
-            picked_color,
-            Stroke::new(visuals.fg_stroke.width, contrast_color(picked_color)),
+            Color32::WHITE,
+            Stroke::new(visuals.fg_stroke.width, Color32::BLACK),
         ));
+        // ui.painter().add(Shape::convex_polygon(
+        //     vec![
+        //         pos2(x + r / 2., rect.top()),
+        //         pos2(x, rect.top() + r),
+        //         pos2(x - r / 2., rect.top()),
+        //     ],
+        //     current_color,
+        //     Stroke::new(visuals.fg_stroke.width, contrast_color(current_color)),
+        // ));
+        // ui.painter().add(Shape::convex_polygon(
+        //     vec![
+        //         pos2(x + r / 2., rect.bottom()),
+        //         pos2(x, rect.bottom() - r),
+        //         pos2(x - r / 2., rect.bottom()),
+        //     ],
+        //     current_color,
+        //     Stroke::new(visuals.fg_stroke.width, contrast_color(current_color)),
+        // ));
     }
 
     response
@@ -1617,24 +1650,37 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
         d.get_temp::<OKLabPlotType>(ui.id())
             .unwrap_or(OKLabPlotType::StableHue)
     });
+    let mut tab_switched = false;
     ui.horizontal(|ui| {
         if ui
             .selectable_label(matches!(tab, OKLabPlotType::StableHue), "Lightness/Chroma")
             .clicked()
         {
             tab = OKLabPlotType::StableHue;
+            tab_switched = true;
+            // state.l = lch.l;
+            // state.c = lch.c / 0.325;
+            // state.h = lch.h / std::f32::consts::TAU;
         }
         if ui
             .selectable_label(matches!(tab, OKLabPlotType::StableChroma), "Hue/Lightness")
             .clicked()
         {
             tab = OKLabPlotType::StableChroma;
+            tab_switched = true;
+            // state.l = lch.l;
+            // state.c = lch.c / 0.325;
+            // state.h = lch.h / std::f32::consts::TAU;
         }
         if ui
             .selectable_label(matches!(tab, OKLabPlotType::StableLightness), "Hue/Chroma")
             .clicked()
         {
             tab = OKLabPlotType::StableLightness;
+            tab_switched = true;
+            // state.l = lch.l;
+            // state.c = lch.c / 0.325;
+            // state.h = lch.h / std::f32::consts::TAU;
         }
     });
 
@@ -1667,8 +1713,17 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
     ui.data_mut(|d| {
         d.insert_temp(ui.id(), tab.clone());
     });
-    // show_srgba_unmultiplied(ui, oklch_to_color32(*lch).to_array(), current_color_size)
-    //     .on_hover_text("Selected color");
+
+    if tab_switched {
+        state.l = lch.l;
+        state.c = lch.c / 0.325;
+        state.h = lch.h / std::f32::consts::TAU;
+    }
+
+    let (_, display_color) = oklch_to_color32(lch.clone()); // technically the color from previous frame, but I want to display this above the 2d picker
+    show_srgba_unmultiplied(ui, display_color.to_array(), current_color_size)
+        .on_hover_text("Selected color");
+
     let new_color = match tab {
         OKLabPlotType::StableHue => {
             color_slider_2d_grid_oklch(
@@ -1753,8 +1808,8 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
             picked_color
         }
     };
-    show_srgba_unmultiplied(ui, new_color.to_array(), current_color_size)
-        .on_hover_text("Selected color");
+    // show_srgba_unmultiplied(ui, new_color.to_array(), current_color_size)
+    //     .on_hover_text("Selected color");
 
     // --- Lightness slider (0..1) ---
     ui.horizontal(|ui| {
@@ -1762,6 +1817,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
             ui,
             &mut state.l,
             lch.l,
+            display_color,
             |l_mut| oklch_to_color32(Oklch { l: l_mut, c, h }),
             &"lightness",
         )
@@ -1781,6 +1837,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
             ui,
             &mut state.c,
             lch.c / 0.325,
+            display_color,
             |c_mut| {
                 oklch_to_color32(Oklch {
                     l,
@@ -1802,6 +1859,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
         state.c = chroma_val / 0.325;
     });
 
+    // --- Hue slider ---
     let determine_hue_slider_colors = |h_mut| {
         let (is_valid, color) = oklch_to_color32(Oklch {
             l: l,
@@ -1826,13 +1884,12 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
         // render the fallback color we determined here.
         (true, color)
     };
-
-    // --- Hue slider ---
     ui.horizontal(|ui| {
         color_slider_1d_grid(
             ui,
             &mut state.h,
             lch.h / std::f32::consts::TAU,
+            display_color,
             determine_hue_slider_colors,
             &"hue",
         )
@@ -1853,6 +1910,9 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
     // lch.l = state.l;
     // lch.c = state.c * 0.325;
     // lch.h = state.h * std::f32::consts::TAU;
+    // state.l = lch.l;
+    // state.c = lch.c / 0.325;
+    // state.h = -lch.h / std::f32::consts::TAU;
 
     ui.data_mut(|d| {
         d.insert_temp(state_id, state);
@@ -2000,26 +2060,10 @@ pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Color32) -> Response {
 }
 
 pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32) -> bool {
-    // --- Convert incoming Color32 → OKLCh ---
-    let srgb = Srgb {
-        r: color.r() as f32 / 255.0,
-        g: color.g() as f32 / 255.0,
-        b: color.b() as f32 / 255.0,
-    };
-
-    let linear = srgb_to_linear_srgb(srgb);
-    let lab = linear_srgb_to_oklab(linear);
-    let mut new_lch = oklab_to_oklch(lab);
-
+    let mut new_lch = color32_to_oklch(*color);
     let mut new_alpha = color.a() as f32 / 255.0;
 
     let new_color = color_picker_oklch_2d(ui, &mut new_lch, &mut new_alpha);
-
-    // --- Convert back OKLCh → Color32 ---
-    // let lab = oklch_to_oklab(new_lch);
-    // let linear = oklab_to_linear_srgb(lab);
-    // let srgb = linear_srgb_to_srgb(linear);
-    // let srgb = color32_to_oklch(new_lch);
 
     let prev_color = color.clone();
     *color = new_color;
