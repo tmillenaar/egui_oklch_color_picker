@@ -224,7 +224,7 @@ fn color_slider_1d_grid(
     ui: &mut Ui,
     slider_value: &mut f32,
     color_value_normalized: f32,
-    color_at: impl Fn(f32) -> Option<Color32>,
+    color_at: impl Fn(f32) -> (bool, Color32),
     axis_name: &str,
 ) -> Response {
     let desired_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
@@ -277,19 +277,17 @@ fn color_slider_1d_grid(
                         0.0
                     };
 
-                    match color_at(t) {
-                        None => {
-                            pixels.push(0);
-                            pixels.push(0);
-                            pixels.push(0);
-                            pixels.push(0);
-                        }
-                        Some(color) => {
-                            pixels.push(color.r());
-                            pixels.push(color.g());
-                            pixels.push(color.b());
-                            pixels.push(color.a());
-                        }
+                    let (is_valid, color) = color_at(t);
+                    if is_valid {
+                        pixels.push(color.r());
+                        pixels.push(color.g());
+                        pixels.push(color.b());
+                        pixels.push(color.a());
+                    } else {
+                        pixels.push(0);
+                        pixels.push(0);
+                        pixels.push(0);
+                        pixels.push(0);
                     };
                 }
             }
@@ -329,9 +327,9 @@ fn color_slider_1d_grid(
 
         // Show current slider location with marker
         let r = rect.height() / 4.0;
-        let picked_color = match color_at(*slider_value) {
-            Some(color) => color,
-            None => Color32::from_rgba_premultiplied(0, 0, 0, 0),
+        let (is_valid, mut picked_color) = color_at(*slider_value);
+        if !is_valid {
+            picked_color = Color32::from_rgba_premultiplied(0, 0, 0, 0);
         };
         let x = lerp(rect.left()..=rect.right(), *slider_value);
         ui.painter().add(Shape::convex_polygon(
@@ -552,15 +550,15 @@ pub enum Alpha {
     BlendOrAdditive,
 }
 
-fn oklch_to_color32(c: Oklch) -> Color32 {
-    let srgb = linear_srgb_to_srgb(oklab_to_linear_srgb(oklch_to_oklab(c)));
+// fn oklch_to_color32(c: Oklch) -> Color32 {
+//     let srgb = linear_srgb_to_srgb(oklab_to_linear_srgb(oklch_to_oklab(c)));
 
-    Color32::from_rgb(
-        (srgb.r * 255.) as u8,
-        (srgb.g * 255.) as u8,
-        (srgb.b * 255.) as u8,
-    )
-}
+//     Color32::from_rgb(
+//         (srgb.r * 255.) as u8,
+//         (srgb.g * 255.) as u8,
+//         (srgb.b * 255.) as u8,
+//     )
+// }
 
 // fn color_picker_hsvag_2d(ui: &mut Ui, hsvag: &mut HsvaGamma, alpha: Alpha) {
 //     use egui::style::NumericColorSpace;
@@ -701,7 +699,7 @@ fn color_slider_2d_grid_oklch(
     l_value: &mut f32,
     c_value: &mut f32,
     hue: f32,
-    color_at: impl Fn(f32, f32, f32) -> Option<Color32>,
+    color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
 ) -> Response {
     let desired_size = Vec2::splat(ui.spacing().slider_width);
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
@@ -738,17 +736,14 @@ fn color_slider_2d_grid_oklch(
                 for x in 0..pixels_w {
                     let ct = x as f32 / (pixels_w as f32 - 1.0); // chroma
 
-                    let color = color_at(lt, ct, hue);
+                    let (is_valid, color) = color_at(lt, ct, hue);
 
-                    let (r, g, b, a) = match color {
-                        Some(c) => (c.r(), c.g(), c.b(), c.a()),
-                        None => (0, 0, 0, 0), // invalid → fully transparent
-                    };
+                    let (r, g, b, a) = color.to_tuple();
 
                     pixels.push(r);
                     pixels.push(g);
                     pixels.push(b);
-                    pixels.push(a);
+                    pixels.push(is_valid as u8);
                 }
             }
 
@@ -913,7 +908,7 @@ impl CachedPicker {
         size: Vec2,
         stable_value: f32,
         invert_radial_value: bool,
-        color_at: impl Fn(f32, f32, f32) -> Option<Color32>,
+        color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
     ) -> CachedPicker {
         let pixels_w = size.x as usize;
         let pixels_h = size.y as usize;
@@ -948,8 +943,10 @@ impl CachedPicker {
         &mut self,
         stable_value: f32,
         invert_radial_value: bool,
-        color_at: impl Fn(f32, f32, f32) -> Option<Color32>,
+        color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
     ) {
+        self.stable_value_bits = (stable_value * 10000.) as u32;
+
         let pixels_w = self.size.x as usize;
         let pixels_h = self.size.y as usize;
         let polar_coordinates = self.polar_coordinates.clone();
@@ -1076,7 +1073,7 @@ impl CachedPicker {
         size: &Vec2,
         stable_value: f32,
         invert_radial_value: bool,
-        color_at: impl Fn(f32, f32, f32) -> Option<Color32>,
+        color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
     ) -> Vec<u8> {
         let pixels_w = size.x as usize;
         let pixels_h = size.y as usize;
@@ -1097,22 +1094,19 @@ impl CachedPicker {
                 } else {
                     polar_coord.radius.clamp(0.0, 1.0)
                 };
-                let color = color_at(
+                let (is_valid, color) = color_at(
                     polar_coord.angle / std::f32::consts::TAU,
                     radius,
                     stable_value,
                 );
 
-                match color {
-                    Some(c) => {
-                        let i = (i_y * pixels_w + i_x) * 4;
-                        pixels[i] = c.r();
-                        pixels[i + 1] = c.g();
-                        pixels[i + 2] = c.b();
-                        pixels[i + 3] = c.a();
-                    }
-                    None => {}
-                };
+                if is_valid {
+                    let i = (i_y * pixels_w + i_x) * 4;
+                    pixels[i] = color.r();
+                    pixels[i + 1] = color.g();
+                    pixels[i + 2] = color.b();
+                    pixels[i + 3] = color.a();
+                }
             }
         }
         pixels
@@ -1150,7 +1144,7 @@ impl CachedPicker {
         angle: f32,
         radius: f32,
         invert_radial_value: bool,
-        color_at: impl Fn(f32, f32, f32) -> Option<Color32>, // TODO: move to self as function pointer
+        color_at: impl Fn(f32, f32, f32) -> (bool, Color32), // TODO: move to self as function pointer
     ) -> Color32 {
         // Here we could sample the pixels vec, but we can also determine the color
         // based on coordinates. This makes the function less pleasant to use, as we
@@ -1164,8 +1158,8 @@ impl CachedPicker {
         } else {
             radius.clamp(0.0, 1.0)
         };
-        let color = color_at(angle / std::f32::consts::TAU, r, stable_value);
-        if let Some(color) = color {
+        let (is_valid, color) = color_at(angle / std::f32::consts::TAU, r, stable_value);
+        if is_valid {
             return color;
         }
 
@@ -1187,13 +1181,12 @@ impl CachedPicker {
                     polar_coord.radius.clamp(0.0, 1.0)
                 };
 
-                color_at(
-                    // polar_coord.angle / std::f32::consts::TAU,
+                let (_, color) = color_at(
                     polar_coord.angle / std::f32::consts::TAU,
                     radius,
                     stable_value,
-                )
-                .unwrap_or(fallback_color)
+                );
+                color
             }
         };
         color
@@ -1462,7 +1455,7 @@ fn color_slider_2d_radial(
     angle_value: &mut f32,
     radial_value: &mut f32,
     invert_radial_value: bool,
-    color_at: impl Fn(f32, f32, f32) -> Option<Color32>,
+    color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
     ui_identifyable_label: &str,
 ) -> Response {
     let desired_size = Vec2::splat(ui.spacing().slider_width);
@@ -1501,9 +1494,7 @@ fn color_slider_2d_radial(
         let size = rect.size();
 
         let picker_id = ui.id().with(ui_identifyable_label);
-        let mut picker_cache = ui
-            .data(|d| d.get_temp::<Option<CachedPicker>>(picker_id))
-            .unwrap_or(None);
+        let mut picker_cache = ui.data(|d| d.get_temp::<CachedPicker>(picker_id));
 
         let mut picker_info = match picker_cache {
             None => CachedPicker::new(ui, size, stable_value, invert_radial_value, &color_at),
@@ -1514,11 +1505,9 @@ fn color_slider_2d_radial(
         let stable_value_changed = picker_info.stable_value_bits != stable_value_bits;
         let size_changed = picker_info.size != size;
         if size_changed {
-            println!("SIZE CHANGED!!");
             picker_info.update_polar_coordinates(size);
         }
         if size_changed || stable_value_changed {
-            println!("UPDATING PIXEL VALUES!!");
             picker_info.update_pixel_values_and_border_positions(
                 stable_value,
                 invert_radial_value,
@@ -1532,59 +1521,9 @@ fn color_slider_2d_radial(
             (*radial_value).clamp(0.0, 1.0)
         };
 
-        // Color border white
-        // for pos in border_positions.clone() {
-        //     // let i = (pos.y * pixels_w + pos.x) * 4;
-        //     let i = (pos.1 * pixels_w + pos.0) * 4;
-        //     pixels[i] = 255;
-        //     pixels[i+1] = 255;
-        //     pixels[i+2] = 255;
-        //     pixels[i+3] = 255;
-        // }
-        //
-
-        // let fallback = nearest_valid_coord(
-        //     &pixels,
-        //     pixels_w,
-        //     pixels_h,
-        //     sample_radius,
-        //     *angle_value * std::f32::consts::TAU,
-        // );
-        // if let Some(pos) = fallback {
-        //     // let i = (pos.y * pixels_w + pos.x) * 4;
-        //     let i = (pos.x as usize * size.x + pos.y as usize) * 4;
-        //     pixels[i] = 255;
-        //     pixels[i + 1] = 0;
-        //     pixels[i + 2] = 0;
-        //     pixels[i + 3] = 255;
-        // }
-
-        // let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
-
-        // match &mut tex {
-        //     Some(t) => {
-        //         t.set(image, egui::TextureOptions::LINEAR);
-        //     }
-        //     None => {
-        //         tex = Some(ui.ctx().load_texture(
-        //             "oklch_radial_fixed",
-        //             image,
-        //             egui::TextureOptions::LINEAR,
-        //         ));
-        //     }
-        // }
-
         ui.data_mut(|d| {
             d.insert_temp(picker_id, picker_info.clone());
         });
-
-        // Some(fallback)
-        // pixels
-        // } else {
-        //     // Get pixels from cache
-        //     None
-        // };
-        // dbg!(obtained_color_pos);
 
         let tex = picker_info.texture.clone();
         ui.painter().image(
@@ -1620,34 +1559,12 @@ fn color_slider_2d_radial(
         let x = ui_center.x + angle.cos() * r * radius;
         let y = ui_center.y - angle.sin() * r * radius;
 
-        // println!("Attempting to get color at coord: {}, {}", x, y);
-        // let fallback = nearest_valid_coord(
-        //     &pixels,
-        //     pixels_w,
-        //     pixels_h,
-        //     *radial_value,
-        //     *angle_value,
-        // );
-
-        // if let Some(pos) = fallback {
-        //     draw_inward_triangles(
-        //         ui.painter(),
-        //         Pos2::new(pos.x as f32, pos.y as f32),
-        //         4.0,  // radius
-        //         4.0,  // size
-        //         4,    // count
-        //         45.0, // radial-offset
-        //         Color32::WHITE,
-        //         Stroke {
-        //             width: 0.5,
-        //             color: Color32::BLACK,
-        //         },
-        //     );
-        // }
-        let color = color_at(angle / std::f32::consts::TAU, *radial_value, stable_value);
-        let (indicator_color, marker_angle) = match color {
-            None => (Color32::WHITE, 0.),
-            Some(c) => (c, 45.),
+        let (is_valid, color) =
+            color_at(angle / std::f32::consts::TAU, *radial_value, stable_value);
+        let (indicator_color, marker_angle) = if is_valid {
+            (Color32::WHITE, 45.)
+        } else {
+            (Color32::WHITE, 0.)
         };
         draw_inward_triangles(
             ui.painter(),
@@ -1664,7 +1581,7 @@ fn color_slider_2d_radial(
         );
 
         // Draw indicator at loction of fallback color
-        if color.is_none() {
+        if !is_valid {
             let fallback_color_pos = picker_info.nearest_valid_border_coord(r, angle);
             let color = picker_info.nearest_valid_color(angle, r, invert_radial_value, &color_at);
             if let Some(pos) = fallback_color_pos {
@@ -1682,8 +1599,6 @@ fn color_slider_2d_radial(
                     },
                 );
             }
-        } else {
-            println!("FOUND COLOR");
         }
     }
 
@@ -1701,7 +1616,7 @@ enum OKLabPlotType {
     StableHue,
 }
 
-fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
+fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color32 {
     let current_color_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
 
     // let Oklch { l, c, h } = *lch;
@@ -1751,9 +1666,8 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
     ui.horizontal(|ui| {
         input_type_button_ui(ui);
 
-        // TODO: get nearest color!
-        // let color = try_oklch_to_color32(Oklch {
-        let color = oklch_to_color32(Oklch {
+        // TODO: get nearest color! nocheckin
+        let (is_valid, color) = oklch_to_color32(Oklch {
             l,
             c: c * 0.325,
             h: h * std::f32::consts::TAU,
@@ -1778,9 +1692,9 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
     ui.data_mut(|d| {
         d.insert_temp(ui.id(), tab.clone());
     });
-    show_srgba_unmultiplied(ui, oklch_to_color32(*lch).to_array(), current_color_size)
-        .on_hover_text("Selected color");
-    match tab {
+    // show_srgba_unmultiplied(ui, oklch_to_color32(*lch).to_array(), current_color_size)
+    //     .on_hover_text("Selected color");
+    let new_color = match tab {
         OKLabPlotType::StableHue => {
             color_slider_2d_grid_oklch(
                 ui,
@@ -1788,13 +1702,14 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
                 &mut state.c,
                 state.h * std::f32::consts::TAU,
                 |l, c, h| {
-                    try_oklch_to_color32(Oklch {
+                    oklch_to_color32(Oklch {
                         l,
                         c: c * 0.325, // match your chroma scaling
                         h,
                     })
                 },
             );
+            Color32::CYAN
         }
         OKLabPlotType::StableChroma => {
             color_slider_2d_radial(
@@ -1804,7 +1719,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
                 &mut state.l,
                 true,
                 |angle, radian, stable| {
-                    try_oklch_to_color32(Oklch {
+                    oklch_to_color32(Oklch {
                         l: radian,
                         c: stable * 0.325,
                         h: angle * std::f32::consts::TAU,
@@ -1812,8 +1727,10 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
                 },
                 "StableChromeColorPicker",
             );
+            Color32::ORANGE
         }
         OKLabPlotType::StableLightness => {
+            let ui_identifyable_label = "StableLightnessColorPicker";
             color_slider_2d_radial(
                 ui,
                 state.l,
@@ -1821,16 +1738,34 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
                 &mut state.c,
                 false,
                 |angle, radian, stable| {
-                    try_oklch_to_color32(Oklch {
+                    oklch_to_color32(Oklch {
                         l: stable,
                         c: radian * 0.325,
                         h: angle * std::f32::consts::TAU,
                     })
                 },
-                "StableLightnessColorPicker",
+                ui_identifyable_label,
             );
+            let picker_id = ui.id().with(ui_identifyable_label);
+            let picker_info = ui.data(|d| d.get_temp::<CachedPicker>(picker_id).unwrap()); // Has to have been set by color_slider_2d_radial.
+            let picked_color = picker_info.nearest_valid_color(
+                state.h * std::f32::consts::TAU,
+                (state.c).clamp(0.0, 1.0),
+                false,
+                |angle, radian, stable| {
+                    oklch_to_color32(Oklch {
+                        l: stable,
+                        c: radian * 0.325,
+                        h: angle * std::f32::consts::TAU,
+                    })
+                },
+            );
+            picked_color
+            // *lch = color32_to_oklch(picked_color);
         }
-    }
+    };
+    show_srgba_unmultiplied(ui, new_color.to_array(), current_color_size)
+        .on_hover_text("Selected color");
 
     // --- Lightness slider (0..1) ---
     ui.horizontal(|ui| {
@@ -1838,7 +1773,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
             ui,
             &mut state.l,
             lch.l,
-            |l_mut| try_oklch_to_color32(Oklch { l: l_mut, c, h }),
+            |l_mut| oklch_to_color32(Oklch { l: l_mut, c, h }),
             &"lightness",
         )
         .on_hover_text("Lightness");
@@ -1858,7 +1793,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
             &mut state.c,
             lch.c / 0.325,
             |c_mut| {
-                try_oklch_to_color32(Oklch {
+                oklch_to_color32(Oklch {
                     l,
                     c: c_mut * 0.325,
                     h,
@@ -1879,30 +1814,28 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
     });
 
     let determine_hue_slider_colors = |h_mut| {
-        let color = try_oklch_to_color32(Oklch {
+        let (is_valid, color) = oklch_to_color32(Oklch {
             l: l,
             c: c,
             h: h_mut * std::f32::consts::TAU,
         });
 
-        match color {
-            None => {
-                let bg_color = try_oklch_to_color32(Oklch {
-                    l: 0.750,
-                    c: 0.127,
-                    h: h_mut * std::f32::consts::TAU,
-                })
-                .unwrap() // With the chosen l and c, there is always a defined hue
-                .blend(Color32::from_black_alpha(40));
-                Some(Color32::from_rgba_unmultiplied(
-                    bg_color.r(),
-                    bg_color.g(),
-                    bg_color.b(),
-                    210,
-                ))
-            }
-            Some(color) => Some(color),
-        }
+        let color = if !is_valid {
+            let (_, bg_color) = oklch_to_color32(Oklch {
+                l: 0.750,
+                c: 0.127,
+                h: h_mut * std::f32::consts::TAU,
+            });
+            let bg_color = bg_color.blend(Color32::from_black_alpha(40));
+            Color32::from_rgba_unmultiplied(bg_color.r(), bg_color.g(), bg_color.b(), 210)
+        } else {
+            color
+        };
+        // Since we already assign a fallback color here,
+        // we return true indicating the color is valid or
+        // the function this closure is passed to will not
+        // render the fallback color we determined here.
+        (true, color)
     };
 
     // --- Hue slider ---
@@ -1928,15 +1861,17 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) {
 
     // let edited = drag_value(ui, "H ", &mut state.h).changed();
 
-    lch.l = state.l;
-    lch.c = state.c * 0.325;
-    lch.h = state.h * std::f32::consts::TAU;
+    // lch.l = state.l;
+    // lch.c = state.c * 0.325;
+    // lch.h = state.h * std::f32::consts::TAU;
 
     ui.data_mut(|d| {
         d.insert_temp(state_id, state);
     });
 
     // TODO: Add alpha slider?
+
+    new_color
 }
 
 fn input_type_button_ui(ui: &mut Ui) {
@@ -2089,20 +2024,22 @@ pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32) -> bool {
 
     let mut new_alpha = color.a() as f32 / 255.0;
 
-    color_picker_oklch_2d(ui, &mut new_lch, &mut new_alpha);
+    let new_color = color_picker_oklch_2d(ui, &mut new_lch, &mut new_alpha);
 
     // --- Convert back OKLCh → Color32 ---
-    let lab = oklch_to_oklab(new_lch);
-    let linear = oklab_to_linear_srgb(lab);
-    let srgb = linear_srgb_to_srgb(linear);
+    // let lab = oklch_to_oklab(new_lch);
+    // let linear = oklab_to_linear_srgb(lab);
+    // let srgb = linear_srgb_to_srgb(linear);
+    // let srgb = color32_to_oklch(new_lch);
 
     let prev_color = color.clone();
-    *color = Color32::from_rgba_unmultiplied(
-        (srgb.r * 255.0).round() as u8,
-        (srgb.g * 255.0).round() as u8,
-        (srgb.b * 255.0).round() as u8,
-        (new_alpha * 255.0).round() as u8,
-    );
+    *color = new_color;
+    // *color = Color32::from_rgba_unmultiplied(
+    //     (srgb.r * 255.0).round() as u8,
+    //     (srgb.g * 255.0).round() as u8,
+    //     (srgb.b * 255.0).round() as u8,
+    //     (new_alpha * 255.0).round() as u8,
+    // );
     if *color == prev_color { false } else { true }
 }
 

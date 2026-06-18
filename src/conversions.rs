@@ -55,17 +55,7 @@ pub fn linear_srgb_to_srgb(c: LinearSrgb) -> Srgb {
 pub fn srgb_to_linear_srgb(c: Srgb) -> LinearSrgb {
     let linearize = |x: f32| {
         if x >= 0.04045 {
-            // ((x + 0.055) / 1.055).powf(2.4)
-
-            // TODO: Perf: use linear-srgb create for faster conversions.
-            //       That would probably require a little restructuring as their
-            //       slice methods work on many colors at once.
-
-            // Fast approximation for x^(1/2.4)
-            let x_sqrt = x.sqrt();
-            let x_fourth = x_sqrt.sqrt();
-            let x_eighth = x_fourth.sqrt();
-            0.5851223 * x_sqrt + 0.4204550 * x_fourth - 0.0055773 * x_eighth
+            ((x + 0.055) / 1.055).powf(2.4)
         } else {
             x / 12.92
         }
@@ -94,7 +84,7 @@ pub fn linear_srgb_to_oklab(c: LinearSrgb) -> Oklab {
     }
 }
 
-pub fn oklab_to_linear_srgb(c: Oklab) -> LinearSrgb {
+pub fn oklab_to_linear_srgb(c: Oklab) -> (bool, LinearSrgb) {
     let l_ = c.l + 0.3963377774 * c.a + 0.2158037573 * c.b;
     let m_ = c.l - 0.1055613458 * c.a - 0.0638541728 * c.b;
     let s_ = c.l - 0.0894841775 * c.a - 1.2914855480 * c.b;
@@ -103,11 +93,20 @@ pub fn oklab_to_linear_srgb(c: Oklab) -> LinearSrgb {
     let m = m_ * m_ * m_;
     let s = s_ * s_ * s_;
 
-    LinearSrgb {
-        r: 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
-        g: -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
-        b: -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
-    }
+    let r = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+    let g = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+    let b = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
+
+    let is_pure_conversion =
+        !((r < 0.0 || r > 1.0) || (g < 0.0 || g > 1.0) || (b < 0.0 || b > 1.0));
+
+    let clamped_color = LinearSrgb {
+        r: r.clamp(0., 1.),
+        g: g.clamp(0., 1.),
+        b: b.clamp(0., 1.),
+    };
+
+    (is_pure_conversion, clamped_color)
 }
 
 pub fn oklab_to_oklch(c: Oklab) -> Oklch {
@@ -131,27 +130,40 @@ pub fn oklch_to_oklab(c: Oklch) -> Oklab {
     }
 }
 
-pub fn try_oklch_to_linear_srgb(c: Oklch) -> Option<LinearSrgb> {
-    let rgb = oklab_to_linear_srgb(oklch_to_oklab(c));
+// pub fn try_oklch_to_linear_srgb(c: Oklch, clamp: bool) -> Option<LinearSrgb> {
+//     let rgb = oklab_to_linear_srgb(oklch_to_oklab(c));
 
-    if !(0.0..=1.0).contains(&rgb.r)
-        || !(0.0..=1.0).contains(&rgb.g)
-        || !(0.0..=1.0).contains(&rgb.b)
-    {
-        None
-    } else {
-        Some(rgb)
-    }
-}
+//     if !(0.0..=1.0).contains(&rgb.r)
+//         || !(0.0..=1.0).contains(&rgb.g)
+//         || !(0.0..=1.0).contains(&rgb.b)
+//     {
+//         None
+//     } else {
+//         Some(rgb)
+//     }
+// }
 
-pub fn try_oklch_to_color32(c: Oklch) -> Option<crate::Color32> {
-    let linear = try_oklch_to_linear_srgb(c)?;
+pub fn oklch_to_color32(c: Oklch) -> (bool, crate::Color32) {
+    let (is_valid, linear) = oklab_to_linear_srgb(oklch_to_oklab(c));
 
     let srgb = linear_srgb_to_srgb(linear);
 
-    Some(crate::Color32::from_rgb(
-        (srgb.r * 255.0).round() as u8,
-        (srgb.g * 255.0).round() as u8,
-        (srgb.b * 255.0).round() as u8,
-    ))
+    let color = crate::Color32::from_rgb(
+        (srgb.r * 255.0) as u8,
+        (srgb.g * 255.0) as u8,
+        (srgb.b * 255.0) as u8,
+    );
+    (is_valid, color)
+}
+
+pub fn color32_to_oklch(color: crate::Color32) -> Oklch {
+    // let [r, g, b, a] = color.to_srgba_unmultiplied();
+    let [r, g, b, a] = color.to_array();
+    let linear = srgb_to_linear_srgb(Srgb {
+        r: r as f32 / 255.,
+        g: g as f32 / 255.,
+        b: b as f32 / 255.,
+    });
+    let lab = linear_srgb_to_oklab(linear);
+    oklab_to_oklch(lab)
 }
