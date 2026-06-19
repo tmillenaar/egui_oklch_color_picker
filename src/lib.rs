@@ -7,12 +7,12 @@ use std::sync::Arc;
 
 use crate::conversions::*;
 use egui::Order::Background;
-use egui::cache::*;
 use egui::epaint::RectShape;
 use egui::{
-    Context, DragValue, Id, Painter, Popup, PopupCloseBehavior, Pos2, Response, Sense,
-    TextureHandle, Ui, Widget as _, WidgetInfo, WidgetType, epaint, lerp, remap_clamp,
+    Context, DragValue, Id, Painter, PointerButton, Popup, PopupCloseBehavior, Pos2, Response,
+    Sense, TextureHandle, Ui, Widget as _, WidgetInfo, WidgetType, epaint, lerp, remap_clamp,
 };
+use egui::{cache::*, viewport};
 use epaint::{
     Mesh, Rect, Shape, Stroke, StrokeKind, Vec2,
     ecolor::{Color32, Hsva, HsvaGamma, Rgba},
@@ -942,6 +942,7 @@ struct RadialCoordinate {
 struct CachedPicker {
     stable_value_bits: u32,
     size: Vec2,
+    viewport_bounds: [f32; 4],
     texture: egui::TextureHandle,
     polar_coordinates: Arc<[RadialCoordinate]>,
     border_positions: Arc<[Pos2]>,
@@ -957,7 +958,8 @@ impl CachedPicker {
     ) -> CachedPicker {
         let pixels_w = size.x as usize;
         let pixels_h = size.y as usize;
-        let polar_coordinates = CachedPicker::calculate_polar_coordinates(size);
+        let viewport_bounds = [-1., -1., 1., 1.];
+        let polar_coordinates = CachedPicker::calculate_polar_coordinates(size, viewport_bounds);
         let pixels = CachedPicker::calculate_color_per_pixel(
             &polar_coordinates,
             &size,
@@ -973,6 +975,7 @@ impl CachedPicker {
         CachedPicker {
             stable_value_bits: (stable_value * 10000.) as u32,
             size: size,
+            viewport_bounds,
             texture: texture,
             polar_coordinates: Arc::from(polar_coordinates),
             border_positions: Arc::from(border_positions),
@@ -980,7 +983,7 @@ impl CachedPicker {
     }
 
     fn update_polar_coordinates(&mut self, size: Vec2) {
-        let coords = CachedPicker::calculate_polar_coordinates(size);
+        let coords = CachedPicker::calculate_polar_coordinates(size, self.viewport_bounds);
         self.polar_coordinates = Arc::from(coords);
     }
 
@@ -1010,31 +1013,147 @@ impl CachedPicker {
         self.texture.set(image, egui::TextureOptions::LINEAR);
     }
 
-    fn calculate_polar_coordinates(size: Vec2) -> Vec<RadialCoordinate> {
+    fn update_viewport_bounds(
+        response: &egui::Response,
+        ui_rect: egui::Rect,
+        viewport_bounds: &mut [f32; 4],
+    ) -> bool {
+        let width = viewport_bounds[2] - viewport_bounds[0];
+        let height = viewport_bounds[3] - viewport_bounds[1];
+
+        let mut viewport_changed = false;
+        //
+        // Pan
+        //
+        let is_pan_button_down = response.ctx.input(|i| {
+            i.pointer.button_down(PointerButton::Secondary)
+                || i.pointer.button_down(PointerButton::Middle)
+        });
+        if is_pan_button_down && response.dragged() {
+            viewport_changed = true;
+
+            let drag = response.drag_delta();
+
+            let dx_world = drag.x / ui_rect.width() * width;
+            let dy_world = drag.y / ui_rect.height() * height;
+
+            viewport_bounds[0] -= dx_world;
+            viewport_bounds[2] -= dx_world;
+
+            viewport_bounds[1] -= dy_world;
+            viewport_bounds[3] -= dy_world;
+        }
+
+        //
+        // Zoom
+        //
+        let scroll = response.ctx.input(|i| i.raw_scroll_delta.y);
+
+        if scroll.abs() > 0.0 {
+            viewport_changed = true;
+
+            if let Some(mouse_pos) = response.hover_pos() {
+                let nx = (mouse_pos.x - ui_rect.left()) / ui_rect.width();
+                let ny = (mouse_pos.y - ui_rect.top()) / ui_rect.height();
+
+                let mouse_world_x =
+                    viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
+
+                let mouse_world_y =
+                    viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
+
+                let zoom_factor = if scroll > 0.0 { 0.9 } else { 1.1 };
+
+                viewport_bounds[0] =
+                    mouse_world_x + (viewport_bounds[0] - mouse_world_x) * zoom_factor;
+
+                viewport_bounds[2] =
+                    mouse_world_x + (viewport_bounds[2] - mouse_world_x) * zoom_factor;
+
+                viewport_bounds[1] =
+                    mouse_world_y + (viewport_bounds[1] - mouse_world_y) * zoom_factor;
+
+                viewport_bounds[3] =
+                    mouse_world_y + (viewport_bounds[3] - mouse_world_y) * zoom_factor;
+            }
+        }
+        if viewport_changed {
+            CachedPicker::clamp_viewport(viewport_bounds)
+        }
+        viewport_changed
+    }
+
+    fn clamp_viewport(viewport: &mut [f32; 4]) {
+        let min_world = -1.0;
+        let max_world = 1.0;
+
+        let mut min_x = viewport[0];
+        let mut min_y = viewport[1];
+        let mut max_x = viewport[2];
+        let mut max_y = viewport[3];
+
+        let width = max_x - min_x;
+        let height = max_y - min_y;
+
+        // -------------------------
+        // 1. Clamp zoom FIRST (uniform bounds)
+        // -------------------------
+        let max_width = max_world - min_world;
+        let max_height = max_world - min_world;
+
+        let width = width.min(max_width);
+        let height = height.min(max_height);
+
+        // compute center BEFORE correction
+        let cx = (min_x + max_x) * 0.5;
+        let cy = (min_y + max_y) * 0.5;
+
+        // rebuild viewport around center (this fixes drift)
+        min_x = cx - width * 0.5;
+        max_x = cx + width * 0.5;
+        min_y = cy - height * 0.5;
+        max_y = cy + height * 0.5;
+
+        // -------------------------
+        // 2. Clamp position (shift as a block)
+        // -------------------------
+        let dx_left = min_world - min_x;
+        let dx_right = max_world - max_x;
+
+        if dx_left > 0.0 {
+            min_x += dx_left;
+            max_x += dx_left;
+        } else if dx_right < 0.0 {
+            min_x += dx_right;
+            max_x += dx_right;
+        }
+
+        let dy_bottom = min_world - min_y;
+        let dy_top = max_world - max_y;
+
+        if dy_bottom > 0.0 {
+            min_y += dy_bottom;
+            max_y += dy_bottom;
+        } else if dy_top < 0.0 {
+            min_y += dy_top;
+            max_y += dy_top;
+        }
+
+        viewport[0] = min_x;
+        viewport[1] = min_y;
+        viewport[2] = max_x;
+        viewport[3] = max_y;
+    }
+
+    fn calculate_polar_coordinates(size: Vec2, viewport_bounds: [f32; 4]) -> Vec<RadialCoordinate> {
         let pixels_w = size.x as usize;
         let pixels_h = size.y as usize;
         let mut coords: Vec<RadialCoordinate> = Vec::with_capacity(pixels_w * pixels_h);
 
-        // let radius_px = pixels_w.min(pixels_h) as f32 * 0.5;
-        // let cx = pixels_w as f32 * 0.5;
-        // let cy = pixels_h as f32 * 0.5;
         for i_y in 0..pixels_h {
             for i_x in 0..pixels_w {
-                let polar_coord = pixel_to_polar(i_x as f32, i_y as f32, pixels_w, pixels_h);
-                // let dx = (i_x as f32 + 0.5) - cx;
-                // let dy = (i_y as f32 + 0.5) - cy;
-
-                // let x_normalized = dx / radius_px;
-                // let y_normalized = dy / radius_px;
-
-                // let r_squared = x_normalized * x_normalized + y_normalized * y_normalized;
-                // let r = r_squared.sqrt();
-
-                // let mut angle = (-y_normalized).atan2(x_normalized);
-                // if angle < 0.0 {
-                //     angle += std::f32::consts::TAU;
-                // }
-                // let polar_coord = RadialCoordinate { radius: r, angle };
+                let polar_coord =
+                    pixel_to_polar(i_x as f32, i_y as f32, pixels_w, pixels_h, viewport_bounds);
                 coords.push(polar_coord);
             }
         }
@@ -1138,6 +1257,7 @@ impl CachedPicker {
             radial_value,
             self.size.x as usize,
             self.size.y as usize,
+            self.viewport_bounds,
         );
         let mut min_distance = f32::MAX;
         let mut min_distance_i = 0;
@@ -1194,6 +1314,7 @@ impl CachedPicker {
                     sample_pos.y,
                     self.size.x as usize,
                     self.size.y as usize,
+                    self.viewport_bounds,
                 );
                 let radius = if invert_radial_value {
                     (1.0 - polar_coord.radius).clamp(0.0, 1.0)
@@ -1277,44 +1398,54 @@ impl CachedPicker {
 //     }
 // }
 
-pub fn polar_to_pixel(angle: f32, radius: f32, width: usize, height: usize) -> (f32, f32) {
-    let radius_px = width.min(height) as f32 * 0.5;
-    let cx = width as f32 * 0.5;
-    let cy = height as f32 * 0.5;
+pub fn polar_to_pixel(
+    angle: f32,
+    radius: f32,
+    width: usize,
+    height: usize,
+    viewport_bounds: [f32; 4], // [min_x, min_y, max_x, max_y]
+) -> (f32, f32) {
+    // -----------------------------
+    // 1. polar → WORLD space
+    // -----------------------------
+    let world_x = radius * angle.cos();
+    let world_y = -radius * angle.sin();
 
-    // inverse normalization
-    let x_norm = radius * angle.cos();
-    let y_norm = -radius * angle.sin();
+    // -----------------------------
+    // 2. WORLD → normalized viewport space [0,1]
+    // -----------------------------
+    let vx = (world_x - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]);
 
-    let dx = x_norm * radius_px;
-    let dy = y_norm * radius_px;
+    let vy = (world_y - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]);
 
-    // convert back to pixel coordinates
-    let x = dx + cx - 0.5;
-    let y = dy + cy - 0.5;
+    // -----------------------------
+    // 3. normalized → pixel space
+    // -----------------------------
+    let x = vx * width as f32 - 0.5;
+    let y = vy * height as f32 - 0.5;
 
     (x, y)
 }
 
-pub fn pixel_to_polar(x: f32, y: f32, width: usize, height: usize) -> RadialCoordinate {
-    let radius_px = width.min(height) as f32 * 0.5;
-    let cx = width as f32 * 0.5;
-    let cy = height as f32 * 0.5;
+pub fn pixel_to_polar(
+    x: f32,
+    y: f32,
+    width: usize,
+    height: usize,
+    viewport_bounds: [f32; 4], // [min_x, min_y, max_x, max_y]
+) -> RadialCoordinate {
+    let nx = (x + 0.5) / width as f32;
+    let ny = (y + 0.5) / height as f32;
 
-    let dx = (x + 0.5) - cx;
-    let dy = (y + 0.5) - cy;
+    let world_x = viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
 
-    let x_normalized = dx / radius_px;
-    let y_normalized = dy / radius_px;
+    let world_y = viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
 
-    let r_squared = x_normalized * x_normalized + y_normalized * y_normalized;
+    let r_squared = world_x * world_x + world_y * world_y;
     let r = r_squared.sqrt();
 
-    // Note: Using fast_math::atan2, the maximum absolute error across all f32s is less than 0.0038.
-    //       This is quite fine for the visualization of the color in relation to an angle.
-    //       Since this calculation is in a hot loop, we benefit significantly from the faster atan2.
     // Invert Y for correct hue rotation direction
-    let mut angle = fast_math::atan2(-y_normalized, x_normalized);
+    let mut angle = fast_math::atan2(-world_y, world_x);
     if angle < 0.0 {
         angle += std::f32::consts::TAU;
     }
@@ -1389,8 +1520,10 @@ pub fn nearest_valid_coord(
     height: usize,
     radial_value: f32,
     angle_value: f32,
+    viewport_bounds: [f32; 4],
 ) -> Option<Pos> {
-    let (start_x, start_y) = polar_to_pixel(angle_value, radial_value, width, height);
+    let (start_x, start_y) =
+        polar_to_pixel(angle_value, radial_value, width, height, viewport_bounds);
     let start_x = start_x as usize;
     let start_y = start_y as usize;
 
@@ -1481,67 +1614,77 @@ fn color_slider_2d_radial(
     let desired_size = Vec2::splat(ui.spacing().slider_width);
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 
+    let size = response.rect.size();
     let ui_center = rect.center();
     let radius = rect.width().min(rect.height()) * 0.5;
 
+    // Get picker info
+    let picker_id = ui.id().with(ui_identifyable_label);
+    let mut picker_cache = ui.data(|d| d.get_temp::<CachedPicker>(picker_id));
+
+    let mut picker_info = match picker_cache {
+        None => CachedPicker::new(ui, size, stable_value, invert_radial_value, &color_at),
+        Some(picker_info) => picker_info,
+    };
+
     // Mouse pointer interaction
-    if let Some(mpos) = response.interact_pointer_pos() {
-        let v = (mpos - ui_center) / radius;
+    let is_lmb_down = response
+        .ctx
+        .input(|i| i.pointer.button_down(PointerButton::Primary));
+    if is_lmb_down {
+        if let Some(mpos) = response.interact_pointer_pos() {
+            // 1. normalize mouse in UI space [0,1]
+            let nx = (mpos.x - response.rect.left()) / size.x;
+            let ny = (mpos.y - response.rect.top()) / size.y;
 
-        let r = v.length().clamp(0.0, 1.0);
+            // 2. convert to WORLD space using viewport
+            let viewport_bounds = picker_info.viewport_bounds;
+            let vx = viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
 
-        // Note: Using fast_math::atan2, the maximum absolute error across all f32s is less than 0.0038.
-        //       This is quite fine for the visualization of the color in relation to an angle.
-        //       Nevertheless, this particualr line is only called once per frame so the normal atan2 is fine
-        // Invert Y for correct hue rotation direction
-        let angle = (-v.y).atan2(v.x);
+            let vy = viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
 
-        let mut h = angle / std::f32::consts::TAU;
-        if h < 0.0 {
-            h += 1.0;
+            // 3. convert world → polar
+            let r = (vx * vx + vy * vy).sqrt().clamp(0.0, 1.0);
+
+            let angle = (-vy).atan2(vx);
+
+            let mut h = angle / std::f32::consts::TAU;
+            if h < 0.0 {
+                h += 1.0;
+            }
+
+            *angle_value = h.clamp(0.0, 1.0);
+            *radial_value = if invert_radial_value { 1.0 - r } else { r };
         }
-
-        *angle_value = h.clamp(0.0, 1.0);
-
-        *radial_value = if invert_radial_value {
-            (1.0 - r).clamp(0.0, 1.0)
-        } else {
-            r.clamp(0.0, 1.0)
-        };
     }
 
     if ui.is_rect_visible(rect) {
-        // background_checkers(ui.painter(), rect, 50);
-
-        // let bg_color = Color32::from_gray(100);
-        // ui.painter().add(RectShape::new(
-        //     rect,
-        //     0, // corner_radius,
-        //     bg_color,
-        //     Stroke::new(0.0, Color32::TRANSPARENT),
-        //     StrokeKind::Inside,
-        // ));
-        //
-
-        // Radial lines
-        for i in 0..6 {
-            ui.painter().circle(
-                Pos2::new(ui_center.x, ui_center.y),
-                0.5 + 25. * i as f32,
-                Color32::TRANSPARENT,
-                egui::Stroke::new(1., Color32::from_rgba_unmultiplied(200, 200, 200, 100)),
-            );
-        }
-
         let size = rect.size();
 
-        let picker_id = ui.id().with(ui_identifyable_label);
-        let mut picker_cache = ui.data(|d| d.get_temp::<CachedPicker>(picker_id));
+        // Radial lines on background
+        let painter = ui.painter().with_clip_rect(response.rect);
+        let viewport_bounds = picker_info.viewport_bounds;
+        let cx = response.rect.left()
+            + ((0.0 - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]))
+                * response.rect.width();
 
-        let mut picker_info = match picker_cache {
-            None => CachedPicker::new(ui, size, stable_value, invert_radial_value, &color_at),
-            Some(picker_info) => picker_info,
-        };
+        let cy = response.rect.top()
+            + ((0.0 - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]))
+                * response.rect.height();
+
+        let world_to_screen = response.rect.width() / (viewport_bounds[2] - viewport_bounds[0]);
+
+        for i in 0..6 {
+            let world_r = 0.01 + 0.15 * i as f32;
+            let screen_r = world_r * world_to_screen;
+
+            painter.circle(
+                Pos2::new(cx, cy),
+                screen_r,
+                Color32::TRANSPARENT,
+                egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(200, 200, 200, 100)),
+            );
+        }
 
         let stable_value_bits = (stable_value * 10000.) as u32;
         let stable_value_changed = picker_info.stable_value_bits != stable_value_bits;
@@ -1550,6 +1693,18 @@ fn color_slider_2d_radial(
             picker_info.update_polar_coordinates(size);
         }
         if size_changed || stable_value_changed {
+            picker_info.update_pixel_values_and_border_positions(
+                stable_value,
+                invert_radial_value,
+                &color_at,
+            );
+        }
+
+        let viewport_changed =
+            CachedPicker::update_viewport_bounds(&response, rect, &mut picker_info.viewport_bounds);
+        if viewport_changed {
+            // picker_info.viewport_bounds = new_viewport_bounds;
+            picker_info.update_polar_coordinates(size);
             picker_info.update_pixel_values_and_border_positions(
                 stable_value,
                 invert_radial_value,
@@ -1583,35 +1738,58 @@ fn color_slider_2d_radial(
         let angle = *angle_value * std::f32::consts::TAU;
 
         let r = if invert_radial_value {
-            (1.0 - *radial_value).clamp(0.0, 1.0)
+            1.0 - *radial_value
         } else {
-            (*radial_value).clamp(0.0, 1.0)
+            *radial_value
         };
 
-        let x = ui_center.x + angle.cos() * r * radius;
-        let y = ui_center.y - angle.sin() * r * radius;
+        // -----------------------------
+        // 1. Polar → WORLD space
+        // -----------------------------
+        let wx = angle.cos() * r;
+        let wy = -angle.sin() * r;
 
+        // -----------------------------
+        // 2. WORLD → SCREEN space
+        // -----------------------------
+        let size = ui_center * 2.0; // or response.rect.size()
+
+        let viewport_bounds = picker_info.viewport_bounds;
+        let nx = (wx - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]);
+
+        let ny = (wy - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]);
+
+        let x = response.rect.left() + nx * response.rect.width();
+        let y = response.rect.top() + ny * response.rect.height();
+
+        // -----------------------------
+        // 3. Color sampling MUST also use world-space mapping
+        // -----------------------------
         let (is_valid, color) =
             color_at(angle / std::f32::consts::TAU, *radial_value, stable_value);
+
         let (indicator_color, marker_angle) = if is_valid {
             (Color32::WHITE, 45.)
         } else {
             (Color32::WHITE, 0.)
         };
+
         draw_inward_triangles(
             ui.painter(),
             Pos2::new(x, y),
-            4.0,          // radius
-            4.0,          // size
-            4,            // count
-            marker_angle, // radial-offset
+            4.0,
+            4.0,
+            4,
+            marker_angle,
             indicator_color,
             Stroke {
                 width: 0.5,
                 color: Color32::BLACK,
             },
         );
-
+        dbg!(is_valid);
+        dbg!(angle);
+        dbg!(radial_value);
         // Draw indicator at loction of fallback color
         if !is_valid {
             let fallback_color_pos = picker_info.nearest_valid_border_coord(r, angle);
