@@ -1050,8 +1050,6 @@ impl CachedPicker {
         let scroll = response.ctx.input(|i| i.raw_scroll_delta.y);
 
         if scroll.abs() > 0.0 {
-            viewport_changed = true;
-
             if let Some(mouse_pos) = response.hover_pos() {
                 let nx = (mouse_pos.x - ui_rect.left()) / ui_rect.width();
                 let ny = (mouse_pos.y - ui_rect.top()) / ui_rect.height();
@@ -1061,6 +1059,30 @@ impl CachedPicker {
 
                 let mouse_world_y =
                     viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
+
+                {
+                    // Do not zoom if we are already zoomed in rather far
+                    let zoom_factor = if scroll > 0.0 { 0.9 } else { 1.1 };
+
+                    let width = viewport_bounds[2] - viewport_bounds[0];
+                    let height = viewport_bounds[3] - viewport_bounds[1];
+
+                    const MAX_ZOOM_FACTOR: f32 = 7.0;
+                    const WORLD_SIZE: f32 = 2.0; // [-1, 1]
+
+                    let min_width = WORLD_SIZE / MAX_ZOOM_FACTOR;
+                    let min_height = WORLD_SIZE / MAX_ZOOM_FACTOR;
+
+                    let new_width = width * zoom_factor;
+                    let new_height = height * zoom_factor;
+
+                    // Prevent further zoom-in once maximum zoom is reached.
+                    if scroll > 0.0 && (new_width < min_width || new_height < min_height) {
+                        // early return to guard against very deep zooms, viewport not changed
+                        return viewport_changed;
+                    }
+                }
+                viewport_changed = true;
 
                 let zoom_factor = if scroll > 0.0 { 0.9 } else { 1.1 };
 
@@ -1787,9 +1809,6 @@ fn color_slider_2d_radial(
                 color: Color32::BLACK,
             },
         );
-        dbg!(is_valid);
-        dbg!(angle);
-        dbg!(radial_value);
         // Draw indicator at loction of fallback color
         if !is_valid {
             let fallback_color_pos = picker_info.nearest_valid_border_coord(r, angle);
