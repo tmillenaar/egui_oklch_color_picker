@@ -1632,7 +1632,7 @@ fn color_slider_2d_radial(
     invert_radial_value: bool,
     color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
     ui_identifyable_label: &str,
-) -> Response {
+) -> (Response, bool) {
     let desired_size = Vec2::splat(ui.spacing().slider_width);
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 
@@ -1679,6 +1679,8 @@ fn color_slider_2d_radial(
             *radial_value = if invert_radial_value { 1.0 - r } else { r };
         }
     }
+
+    let mut viewport_contains_picked_color = false; // default in case rect not visible
 
     if ui.is_rect_visible(rect) {
         let size = rect.size();
@@ -1753,8 +1755,7 @@ fn color_slider_2d_radial(
         );
 
         let visuals = ui.style().interact(&response);
-        ui.painter()
-            .rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
+        painter.rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
 
         // Handle
         let angle = *angle_value * std::f32::consts::TAU;
@@ -1784,6 +1785,10 @@ fn color_slider_2d_radial(
         let x = response.rect.left() + nx * response.rect.width();
         let y = response.rect.top() + ny * response.rect.height();
 
+        let marker_pos = Pos2::new(x, y);
+        viewport_contains_picked_color = response.rect.contains(marker_pos);
+        // dbg!(viewport_contains_picked_color);
+
         // -----------------------------
         // 3. Color sampling MUST also use world-space mapping
         // -----------------------------
@@ -1797,8 +1802,8 @@ fn color_slider_2d_radial(
         };
 
         draw_inward_triangles(
-            ui.painter(),
-            Pos2::new(x, y),
+            &painter,
+            marker_pos,
             4.0,
             4.0,
             4,
@@ -1815,7 +1820,7 @@ fn color_slider_2d_radial(
             let color = picker_info.nearest_valid_color(angle, r, invert_radial_value, &color_at);
             if let Some(pos) = fallback_color_pos {
                 draw_inward_triangles(
-                    ui.painter(),
+                    &painter,
                     pos + rect.min.to_vec2(),
                     3.0,  // radius
                     3.0,  // size
@@ -1835,7 +1840,7 @@ fn color_slider_2d_radial(
         ui.ctx().set_cursor_icon(egui::CursorIcon::None);
     }
 
-    response
+    (response, viewport_contains_picked_color)
 }
 
 #[derive(Debug, Clone)]
@@ -1845,9 +1850,8 @@ enum OKLabPlotType {
     StableHue,
 }
 
-fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color32 {
+fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool, Color32) {
     let current_color_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
-
     // let Oklch { l, c, h } = *lch;
 
     let state_id = ui.id().with("oklch_ui_state");
@@ -1997,7 +2001,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
         }
         OKLabPlotType::StableLightness => {
             let ui_identifyable_label = "StableLightnessColorPicker";
-            color_slider_2d_radial(
+            let (_response, marker_in_viewport) = color_slider_2d_radial(
                 ui,
                 state.l,
                 &mut state.h,
@@ -2014,6 +2018,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
             );
             let picker_id = ui.id().with(ui_identifyable_label);
             let picker_info = ui.data(|d| d.get_temp::<CachedPicker>(picker_id).unwrap()); // Has to have been set by color_slider_2d_radial.
+            // if marker_in_viewport {
             let picked_color = picker_info.nearest_valid_color(
                 state.h * std::f32::consts::TAU,
                 (state.c).clamp(0.0, 1.0),
@@ -2027,6 +2032,12 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
                 },
             );
             picked_color
+            // } else {
+            //     println!("OUTSIDE!");
+            //     // Color outside of viewport, return previous color
+            //     // let (_, picled_color) = oklch_to_color32(prev_lch);
+            //     picled_color
+            // }
         }
     };
     // show_srgba_unmultiplied(ui, new_color.to_array(), current_color_size)
@@ -2122,22 +2133,13 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> Color
         state.h = hue_val / 360.;
     });
 
-    // let edited = drag_value(ui, "H ", &mut state.h).changed();
-
-    // lch.l = state.l;
-    // lch.c = state.c * 0.325;
-    // lch.h = state.h * std::f32::consts::TAU;
-    // state.l = lch.l;
-    // state.c = lch.c / 0.325;
-    // state.h = -lch.h / std::f32::consts::TAU;
-
     ui.data_mut(|d| {
         d.insert_temp(state_id, state);
     });
 
     // TODO: Add alpha slider?
 
-    new_color
+    (marker_in_viewport, new_color)
 }
 
 fn input_type_button_ui(ui: &mut Ui) {
@@ -2277,12 +2279,12 @@ pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Color32) -> Response {
 }
 
 pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32) -> bool {
+    let prev_color = color.clone();
     let mut new_lch = color32_to_oklch(*color);
     let mut new_alpha = color.a() as f32 / 255.0;
 
     let new_color = color_picker_oklch_2d(ui, &mut new_lch, &mut new_alpha);
 
-    let prev_color = color.clone();
     *color = new_color;
     // *color = Color32::from_rgba_unmultiplied(
     //     (srgb.r * 255.0).round() as u8,
