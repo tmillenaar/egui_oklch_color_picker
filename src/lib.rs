@@ -946,6 +946,7 @@ struct CachedPicker {
     texture: egui::TextureHandle,
     polar_coordinates: Arc<[RadialCoordinate]>,
     border_positions: Arc<[Pos2]>,
+    prev_fallback_color_pos: Option<Pos2>,
 }
 
 impl CachedPicker {
@@ -979,6 +980,7 @@ impl CachedPicker {
             texture: texture,
             polar_coordinates: Arc::from(polar_coordinates),
             border_positions: Arc::from(border_positions),
+            prev_fallback_color_pos: None,
         }
     }
 
@@ -1742,10 +1744,6 @@ fn color_slider_2d_radial(
             (*radial_value).clamp(0.0, 1.0)
         };
 
-        ui.data_mut(|d| {
-            d.insert_temp(picker_id, picker_info.clone());
-        });
-
         let tex = picker_info.texture.clone();
         ui.painter().image(
             tex.id(),
@@ -1787,7 +1785,6 @@ fn color_slider_2d_radial(
 
         let marker_pos = Pos2::new(x, y);
         viewport_contains_picked_color = response.rect.contains(marker_pos);
-        // dbg!(viewport_contains_picked_color);
 
         // -----------------------------
         // 3. Color sampling MUST also use world-space mapping
@@ -1816,8 +1813,16 @@ fn color_slider_2d_radial(
         );
         // Draw indicator at loction of fallback color
         if !is_valid {
-            let fallback_color_pos = picker_info.nearest_valid_border_coord(r, angle);
-            let color = picker_info.nearest_valid_color(angle, r, invert_radial_value, &color_at);
+            let fallback_color_pos = if viewport_contains_picked_color {
+                let fallback_color_pos = picker_info.nearest_valid_border_coord(r, angle);
+                picker_info.prev_fallback_color_pos = fallback_color_pos;
+                dbg!(fallback_color_pos);
+                fallback_color_pos
+            } else {
+                dbg!(picker_info.prev_fallback_color_pos);
+                picker_info.prev_fallback_color_pos
+            };
+            // let color = picker_info.nearest_valid_color(angle, r, invert_radial_value, &color_at);
             if let Some(pos) = fallback_color_pos {
                 draw_inward_triangles(
                     &painter,
@@ -1834,6 +1839,10 @@ fn color_slider_2d_radial(
                 );
             }
         }
+
+        ui.data_mut(|d| {
+            d.insert_temp(picker_id, picker_info.clone());
+        });
     }
 
     if response.is_pointer_button_down_on() {
@@ -1852,7 +1861,7 @@ enum OKLabPlotType {
 
 fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool, Color32) {
     let current_color_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
-    // let Oklch { l, c, h } = *lch;
+    let mut marker_in_viewport = false;
 
     let state_id = ui.id().with("oklch_ui_state");
 
@@ -2001,7 +2010,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
         }
         OKLabPlotType::StableLightness => {
             let ui_identifyable_label = "StableLightnessColorPicker";
-            let (_response, marker_in_viewport) = color_slider_2d_radial(
+            let (_response, marker_in_viewport_) = color_slider_2d_radial(
                 ui,
                 state.l,
                 &mut state.h,
@@ -2016,6 +2025,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
                 },
                 ui_identifyable_label,
             );
+            marker_in_viewport = marker_in_viewport_;
             let picker_id = ui.id().with(ui_identifyable_label);
             let picker_info = ui.data(|d| d.get_temp::<CachedPicker>(picker_id).unwrap()); // Has to have been set by color_slider_2d_radial.
             // if marker_in_viewport {
@@ -2283,9 +2293,11 @@ pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32) -> bool {
     let mut new_lch = color32_to_oklch(*color);
     let mut new_alpha = color.a() as f32 / 255.0;
 
-    let new_color = color_picker_oklch_2d(ui, &mut new_lch, &mut new_alpha);
+    let (marker_in_viewport, new_color) = color_picker_oklch_2d(ui, &mut new_lch, &mut new_alpha);
 
-    *color = new_color;
+    if marker_in_viewport {
+        *color = new_color;
+    }
     // *color = Color32::from_rgba_unmultiplied(
     //     (srgb.r * 255.0).round() as u8,
     //     (srgb.g * 255.0).round() as u8,
