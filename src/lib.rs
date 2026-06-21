@@ -946,7 +946,7 @@ struct CachedPicker {
     texture: egui::TextureHandle,
     polar_coordinates: Arc<[RadialCoordinate]>,
     border_positions: Arc<[Pos2]>,
-    prev_fallback_color_pos: Option<Pos2>,
+    prev_fallback_color_pos: Option<RadialCoordinate>,
 }
 
 impl CachedPicker {
@@ -1815,12 +1815,34 @@ fn color_slider_2d_radial(
         if !is_valid {
             let fallback_color_pos = if viewport_contains_picked_color {
                 let fallback_color_pos = picker_info.nearest_valid_border_coord(r, angle);
-                picker_info.prev_fallback_color_pos = fallback_color_pos;
-                dbg!(fallback_color_pos);
-                fallback_color_pos
+                let fallback_color_pos_polar = match fallback_color_pos {
+                    Some(pos) => Some(pixel_to_polar(
+                        pos.x,
+                        pos.y,
+                        picker_info.size.x as usize,
+                        picker_info.size.y as usize,
+                        picker_info.viewport_bounds,
+                    )),
+                    None => None,
+                };
+                picker_info.prev_fallback_color_pos = fallback_color_pos_polar;
+                fallback_color_pos // Return xy, not polar
             } else {
-                dbg!(picker_info.prev_fallback_color_pos);
-                picker_info.prev_fallback_color_pos
+                let fallback_color_pos_polar = picker_info.prev_fallback_color_pos;
+                let fallback_color_pos = match fallback_color_pos_polar {
+                    Some(polar_pos) => {
+                        let (x, y) = polar_to_pixel(
+                            polar_pos.angle,
+                            polar_pos.radius,
+                            picker_info.size.x as usize,
+                            picker_info.size.y as usize,
+                            picker_info.viewport_bounds,
+                        );
+                        Some(Pos2 { x, y })
+                    }
+                    None => None,
+                };
+                fallback_color_pos
             };
             // let color = picker_info.nearest_valid_color(angle, r, invert_radial_value, &color_at);
             if let Some(pos) = fallback_color_pos {
