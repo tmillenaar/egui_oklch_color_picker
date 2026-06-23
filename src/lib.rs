@@ -891,26 +891,26 @@ pub fn draw_inward_triangles(
 }
 
 #[derive(Clone, Copy, Debug)]
-struct RadialCoordinate {
+struct PolarCoordinate {
     radius: f32,
     angle: f32,
 }
 
 // #[derive(Clone, Copy, Hash, PartialEq, Eq)]
-// struct RadialCoordinateCacheKey {
+// struct PolarCoordinateCacheKey {
 //     width: usize,
 //     height: usize,
 // }
 
 // #[derive(Default)]
-// struct RadialCoordinateCache;
+// struct PolarCoordinateCache;
 
-// impl ComputerMut<RadialCoordinateCacheKey, Arc<[RadialCoordinate]>> for RadialCoordinateCache {
-//     fn compute(&mut self, key: RadialCoordinateCacheKey) -> Arc<[RadialCoordinate]> {
+// impl ComputerMut<PolarCoordinateCacheKey, Arc<[PolarCoordinate]>> for PolarCoordinateCache {
+//     fn compute(&mut self, key: PolarCoordinateCacheKey) -> Arc<[PolarCoordinate]> {
 //         let pixels_w = key.width;
 //         let pixels_h = key.height;
 
-//         let mut coords: Vec<RadialCoordinate> = Vec::with_capacity(pixels_w * pixels_h);
+//         let mut coords: Vec<PolarCoordinate> = Vec::with_capacity(pixels_w * pixels_h);
 
 //         let radius_px = pixels_w.min(pixels_h) as f32 * 0.5;
 //         let cx = pixels_w as f32 * 0.5;
@@ -931,7 +931,7 @@ struct RadialCoordinate {
 //                     angle += std::f32::consts::TAU;
 //                 }
 
-//                 coords.push(RadialCoordinate { radius: r, angle });
+//                 coords.push(PolarCoordinate { radius: r, angle });
 //             }
 //         }
 //         Arc::from(coords)
@@ -944,9 +944,9 @@ struct CachedPicker {
     size: Vec2,
     viewport_bounds: [f32; 4],
     texture: egui::TextureHandle,
-    polar_coordinates: Arc<[RadialCoordinate]>,
+    polar_coordinates: Arc<[PolarCoordinate]>,
     border_positions: Arc<[Pos2]>,
-    prev_fallback_color_pos: Option<RadialCoordinate>,
+    prev_fallback_color_pos: Option<PolarCoordinate>,
 }
 
 impl CachedPicker {
@@ -1169,10 +1169,10 @@ impl CachedPicker {
         viewport[3] = max_y;
     }
 
-    fn calculate_polar_coordinates(size: Vec2, viewport_bounds: [f32; 4]) -> Vec<RadialCoordinate> {
+    fn calculate_polar_coordinates(size: Vec2, viewport_bounds: [f32; 4]) -> Vec<PolarCoordinate> {
         let pixels_w = size.x as usize;
         let pixels_h = size.y as usize;
-        let mut coords: Vec<RadialCoordinate> = Vec::with_capacity(pixels_w * pixels_h);
+        let mut coords: Vec<PolarCoordinate> = Vec::with_capacity(pixels_w * pixels_h);
 
         for i_y in 0..pixels_h {
             for i_x in 0..pixels_w {
@@ -1232,7 +1232,7 @@ impl CachedPicker {
     }
 
     fn calculate_color_per_pixel(
-        polar_coordinates: &[RadialCoordinate],
+        polar_coordinates: &[PolarCoordinate],
         size: &Vec2,
         stable_value: f32,
         invert_radial_value: bool,
@@ -1369,8 +1369,8 @@ impl CachedPicker {
 // #[derive(Default)]
 // struct RadialBorderCoordinateCache;
 
-// impl ComputerMut<RadialBorderCoordinateCacheKey, Arc<[RadialCoordinate]>> for RadialBorderCoordinateCache {
-//     fn compute(&mut self, key: RadialBorderCoordinateCacheKey) -> Arc<[RadialCoordinate]> {
+// impl ComputerMut<RadialBorderCoordinateCacheKey, Arc<[PolarCoordinate]>> for RadialBorderCoordinateCache {
+//     fn compute(&mut self, key: RadialBorderCoordinateCacheKey) -> Arc<[PolarCoordinate]> {
 //         let pixels_w = key.width;
 //         let pixels_h = key.height;
 //         let stable_value = key.stable_value as f32 / 10000.;
@@ -1457,7 +1457,7 @@ pub fn pixel_to_polar(
     width: usize,
     height: usize,
     viewport_bounds: [f32; 4], // [min_x, min_y, max_x, max_y]
-) -> RadialCoordinate {
+) -> PolarCoordinate {
     let nx = (x + 0.5) / width as f32;
     let ny = (y + 0.5) / height as f32;
 
@@ -1474,7 +1474,7 @@ pub fn pixel_to_polar(
         angle += std::f32::consts::TAU;
     }
 
-    RadialCoordinate { radius: r, angle }
+    PolarCoordinate { radius: r, angle }
 }
 
 // pub fn nearest_lch_color(
@@ -1657,6 +1657,8 @@ fn color_slider_2d_radial(
         .input(|i| i.pointer.button_down(PointerButton::Primary));
     if is_lmb_down {
         if let Some(mpos) = response.interact_pointer_pos() {
+            // FIXME: selected position makes oval shape when hue is dragged!
+
             // 1. normalize mouse in UI space [0,1]
             let nx = (mpos.x - response.rect.left()) / size.x;
             let ny = (mpos.y - response.rect.top()) / size.y;
@@ -1683,6 +1685,7 @@ fn color_slider_2d_radial(
     }
 
     let mut viewport_contains_picked_color = false; // default in case rect not visible
+    let mut color_is_valid = false; // default in case rect not visible
 
     if ui.is_rect_visible(rect) {
         let size = rect.size();
@@ -1791,6 +1794,7 @@ fn color_slider_2d_radial(
         // -----------------------------
         let (is_valid, color) =
             color_at(angle / std::f32::consts::TAU, *radial_value, stable_value);
+        color_is_valid = is_valid;
 
         let (indicator_color, marker_angle) = if is_valid {
             (Color32::WHITE, 45.)
@@ -1812,7 +1816,14 @@ fn color_slider_2d_radial(
             },
         );
         // Draw indicator at loction of fallback color
-        if !is_valid {
+        if is_valid {
+            picker_info.prev_fallback_color_pos = Some(PolarCoordinate {
+                radius: sample_radius,
+                // radius: *radial_value,
+                angle,
+            });
+            dbg!(&picker_info.prev_fallback_color_pos);
+        } else {
             let fallback_color_pos = if viewport_contains_picked_color {
                 let fallback_color_pos = picker_info.nearest_valid_border_coord(r, angle);
                 let fallback_color_pos_polar = match fallback_color_pos {
@@ -1871,7 +1882,7 @@ fn color_slider_2d_radial(
         ui.ctx().set_cursor_icon(egui::CursorIcon::None);
     }
 
-    (response, viewport_contains_picked_color)
+    (response, viewport_contains_picked_color || color_is_valid)
 }
 
 #[derive(Debug, Clone)]
@@ -1883,7 +1894,7 @@ enum OKLabPlotType {
 
 fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool, Color32) {
     let current_color_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
-    let mut marker_in_viewport = false;
+    let mut update_color = false;
 
     let state_id = ui.id().with("oklch_ui_state");
 
@@ -1999,7 +2010,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
         }
         OKLabPlotType::StableChroma => {
             let ui_identifyable_label = "StableChromeColorPicker";
-            color_slider_2d_radial(
+            let (_response, update_color_) = color_slider_2d_radial(
                 ui,
                 state.c,
                 &mut state.h,
@@ -2014,6 +2025,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
                 },
                 ui_identifyable_label,
             );
+            update_color = update_color_;
             let picker_id = ui.id().with(ui_identifyable_label);
             let picker_info = ui.data(|d| d.get_temp::<CachedPicker>(picker_id).unwrap()); // Has to have been set by color_slider_2d_radial.
             let picked_color = picker_info.nearest_valid_color(
@@ -2032,7 +2044,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
         }
         OKLabPlotType::StableLightness => {
             let ui_identifyable_label = "StableLightnessColorPicker";
-            let (_response, marker_in_viewport_) = color_slider_2d_radial(
+            let (_response, update_color_) = color_slider_2d_radial(
                 ui,
                 state.l,
                 &mut state.h,
@@ -2047,10 +2059,9 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
                 },
                 ui_identifyable_label,
             );
-            marker_in_viewport = marker_in_viewport_;
+            update_color = update_color_;
             let picker_id = ui.id().with(ui_identifyable_label);
             let picker_info = ui.data(|d| d.get_temp::<CachedPicker>(picker_id).unwrap()); // Has to have been set by color_slider_2d_radial.
-            // if marker_in_viewport {
             let picked_color = picker_info.nearest_valid_color(
                 state.h * std::f32::consts::TAU,
                 (state.c).clamp(0.0, 1.0),
@@ -2064,12 +2075,6 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
                 },
             );
             picked_color
-            // } else {
-            //     println!("OUTSIDE!");
-            //     // Color outside of viewport, return previous color
-            //     // let (_, picled_color) = oklch_to_color32(prev_lch);
-            //     picled_color
-            // }
         }
     };
     // show_srgba_unmultiplied(ui, new_color.to_array(), current_color_size)
@@ -2171,7 +2176,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
 
     // TODO: Add alpha slider?
 
-    (marker_in_viewport, new_color)
+    (update_color, new_color)
 }
 
 fn input_type_button_ui(ui: &mut Ui) {
@@ -2315,9 +2320,9 @@ pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32) -> bool {
     let mut new_lch = color32_to_oklch(*color);
     let mut new_alpha = color.a() as f32 / 255.0;
 
-    let (marker_in_viewport, new_color) = color_picker_oklch_2d(ui, &mut new_lch, &mut new_alpha);
+    let (update_color, new_color) = color_picker_oklch_2d(ui, &mut new_lch, &mut new_alpha);
 
-    if marker_in_viewport {
+    if update_color {
         *color = new_color;
     }
     // *color = Color32::from_rgba_unmultiplied(
