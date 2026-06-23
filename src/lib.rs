@@ -409,83 +409,128 @@ pub enum Alpha {
 
 fn color_slider_2d_grid_oklch(
     ui: &mut Ui,
-    l_value: &mut f32,
-    c_value: &mut f32,
-    hue: f32,
+    x_value: &mut f32,
+    y_value: &mut f32,
+    stable_value: f32,
     color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
+    ui_identifyable_label: &str,
 ) -> Response {
     let desired_size = Vec2::splat(ui.spacing().slider_width);
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 
-    // ----------------------------
-    // Interaction (x = chroma, y = lightness)
-    // ----------------------------
-    if let Some(mpos) = response.interact_pointer_pos() {
-        *c_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
-        *l_value = remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
+    let size = response.rect.size();
+    let ui_center = rect.center();
+
+    // Get picker info
+    let picker_id = ui.id().with(ui_identifyable_label);
+    let mut picker_cache = ui.data(|d| d.get_temp::<CachedPickerCartesian>(picker_id));
+
+    let mut picker_info = match picker_cache {
+        None => CachedPickerCartesian::new(ui, size, stable_value, &color_at),
+        Some(picker_info) => picker_info,
+    };
+
+    // Mouse pointer interaction
+    let is_lmb_down = response
+        .ctx
+        .input(|i| i.pointer.button_down(PointerButton::Primary));
+    if is_lmb_down {
+        if let Some(mpos) = response.interact_pointer_pos() {
+            // Interaction (x = chroma, y = lightness)
+            *x_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
+            *y_value = remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
+        }
     }
+
+    let mut viewport_contains_picked_color = false; // default in case rect not visible
+    let mut color_is_valid = false; // default in case rect not visible
 
     if ui.is_rect_visible(rect) {
         let size = rect.size();
-        let tex_id = ui.id().with(("oklch_2d_tex", (hue * 1000.0) as u32));
+        let painter = ui.painter().with_clip_rect(response.rect);
 
-        let mut tex = ui
-            .data(|d| d.get_temp::<Option<egui::TextureHandle>>(tex_id))
-            .unwrap_or(None);
-
-        let pixels_w = size.x as usize;
-        let pixels_h = size.y as usize;
-
-        // Fixme: Also dependent on change in l,c,h values, forn now just always rebuild
-        // let rebuild = tex.is_none() || tex.as_ref().unwrap().size_vec2() != size;
-        let rebuild = true;
-
-        if rebuild {
-            let mut pixels = Vec::with_capacity(pixels_w * pixels_h * 4);
-
-            for y in (0..pixels_h).rev() {
-                let lt = y as f32 / (pixels_h as f32 - 1.0); // lightness
-
-                for x in 0..pixels_w {
-                    let ct = x as f32 / (pixels_w as f32 - 1.0); // chroma
-
-                    let (is_valid, color) = color_at(lt, ct, hue);
-
-                    let (r, g, b, a) = color.to_tuple();
-
-                    pixels.push(r);
-                    pixels.push(g);
-                    pixels.push(b);
-                    pixels.push(is_valid as u8);
-                }
-            }
-
-            let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
-
-            if tex.is_none() {
-                tex = Some(ui.ctx().load_texture(
-                    "oklch_2d_slider",
-                    image,
-                    egui::TextureOptions::LINEAR,
-                ));
-            }
-
-            ui.data_mut(|d| {
-                d.insert_temp(tex_id, tex.clone());
-            });
+        let stable_value_bits = (stable_value * 10000.) as u32;
+        let stable_value_changed = picker_info.stable_value_bits != stable_value_bits;
+        let size_changed = picker_info.size != size;
+        if size_changed {
+            picker_info.update_coordinates(size);
+        }
+        if size_changed || stable_value_changed {
+            picker_info.update_pixel_values_and_border_positions(stable_value, &color_at);
         }
 
-        let tex = tex.as_ref().unwrap();
+        // Maybe unify with conditions above
+        let viewport_changed =
+            CachedPicker::update_viewport_bounds(&response, rect, &mut picker_info.viewport_bounds);
+        if viewport_changed {
+            picker_info.update_coordinates(size);
+            picker_info.update_pixel_values_and_border_positions(stable_value, &color_at);
+        }
 
-        // ----------------------------
-        // Draw texture
-        // ----------------------------
-        ui.painter().image(
+        let tex = picker_info.texture.clone();
+        painter.image(
             tex.id(),
             rect,
             Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
             Color32::WHITE,
         );
+
+        // let visuals = ui.style().interact(&response);
+        // painter.rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
+
+        // let pixels_w = size.x as usize;
+        // let pixels_h = size.y as usize;
+
+        // // Fixme: Also dependent on change in l,c,h values, forn now just always rebuild
+        // // let rebuild = tex.is_none() || tex.as_ref().unwrap().size_vec2() != size;
+        // let rebuild = true;
+
+        // if rebuild {
+        //     let mut pixels = Vec::with_capacity(pixels_w * pixels_h * 4);
+
+        //     for y in (0..pixels_h).rev() {
+        //         let lt = y as f32 / (pixels_h as f32 - 1.0); // lightness
+
+        //         for x in 0..pixels_w {
+        //             let ct = x as f32 / (pixels_w as f32 - 1.0); // chroma
+
+        //             let (is_valid, color) = color_at(lt, ct, hue);
+
+        //             let (r, g, b, a) = color.to_tuple();
+
+        //             pixels.push(r);
+        //             pixels.push(g);
+        //             pixels.push(b);
+        //             pixels.push(is_valid as u8);
+        //         }
+        //     }
+
+        //     let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
+
+        //     if tex.is_none() {
+        //         tex = Some(ui.ctx().load_texture(
+        //             "oklch_2d_slider",
+        //             image,
+        //             egui::TextureOptions::LINEAR,
+        //         ));
+        //     }
+
+        //     ui.data_mut(|d| {
+        //         d.insert_temp(tex_id, tex.clone());
+        //     });
+        // }
+
+        // let tex = tex.as_ref().unwrap();
+
+        // // ----------------------------
+        // // Draw texture
+        // // ----------------------------
+        // ui.painter().image(
+        //     tex.id(),
+        //     rect,
+        //     Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+        //     Color32::WHITE,
+        // );
 
         // ----------------------------
         // Border
@@ -497,8 +542,8 @@ fn color_slider_2d_grid_oklch(
         // ----------------------------
         // Handle
         // ----------------------------
-        let x = lerp(rect.left()..=rect.right(), *c_value);
-        let y = lerp(rect.bottom()..=rect.top(), *l_value);
+        let x = lerp(rect.left()..=rect.right(), *x_value);
+        let y = lerp(rect.bottom()..=rect.top(), *y_value);
 
         draw_inward_triangles(
             ui.painter(),
@@ -513,6 +558,13 @@ fn color_slider_2d_grid_oklch(
                 color: Color32::BLACK,
             },
         );
+        ui.data_mut(|d| {
+            d.insert_temp(picker_id, picker_info.clone());
+        });
+    }
+
+    if response.is_pointer_button_down_on() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::None);
     }
 
     response
@@ -984,6 +1036,382 @@ impl CachedPicker {
     }
 }
 
+#[derive(Clone)]
+struct CachedPickerCartesian {
+    stable_value_bits: u32,
+    size: Vec2,
+    viewport_bounds: [f32; 4],
+    texture: egui::TextureHandle,
+    coordinates: Arc<[Pos2]>,
+    border_positions: Arc<[Pos2]>,
+    prev_fallback_color_pos: Option<PolarCoordinate>,
+}
+
+impl CachedPickerCartesian {
+    fn new(
+        ui: &mut egui::Ui,
+        size: Vec2,
+        stable_value: f32,
+        color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
+    ) -> CachedPickerCartesian {
+        let pixels_w = size.x as usize;
+        let pixels_h = size.y as usize;
+        let viewport_bounds = [0., 0., 1., 1.];
+        // let viewport_bounds = [-1., 0., 1., 1.]; // TODO: ALso create a mode for this, quite nice :)
+        let coordinates = CachedPickerCartesian::calculate_coordinates(size, viewport_bounds);
+        let pixels = CachedPickerCartesian::calculate_color_per_pixel(
+            &coordinates,
+            &size,
+            stable_value,
+            color_at,
+        );
+        let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
+        let texture =
+            ui.ctx()
+                .load_texture("oklch_radial_fixed", image, egui::TextureOptions::LINEAR);
+        let border_positions = CachedPicker::calculate_border_from_pixels(size, &pixels);
+        CachedPickerCartesian {
+            stable_value_bits: (stable_value * 10000.) as u32,
+            size: size,
+            viewport_bounds,
+            texture: texture,
+            coordinates: Arc::from(coordinates),
+            border_positions: Arc::from(border_positions),
+            prev_fallback_color_pos: None,
+        }
+    }
+
+    fn update_coordinates(&mut self, size: Vec2) {
+        let coords = CachedPickerCartesian::calculate_coordinates(size, self.viewport_bounds);
+        self.coordinates = Arc::from(coords);
+    }
+
+    fn update_pixel_values_and_border_positions(
+        &mut self,
+        stable_value: f32,
+        color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
+    ) {
+        self.stable_value_bits = (stable_value * 10000.) as u32;
+
+        let pixels_w = self.size.x as usize;
+        let pixels_h = self.size.y as usize;
+        let coordinates = self.coordinates.clone();
+        let mut pixels = CachedPickerCartesian::calculate_color_per_pixel(
+            &coordinates,
+            &self.size,
+            stable_value,
+            color_at,
+        );
+
+        let border_positions = CachedPicker::calculate_border_from_pixels(self.size, &pixels);
+        self.border_positions = Arc::from(border_positions);
+
+        let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
+        self.texture.set(image, egui::TextureOptions::LINEAR);
+    }
+
+    fn update_viewport_bounds(
+        response: &egui::Response,
+        ui_rect: egui::Rect,
+        viewport_bounds: &mut [f32; 4],
+    ) -> bool {
+        let width = viewport_bounds[2] - viewport_bounds[0];
+        let height = viewport_bounds[3] - viewport_bounds[1];
+
+        let mut viewport_changed = false;
+        //
+        // Pan
+        //
+        let is_pan_button_down = response.ctx.input(|i| {
+            i.pointer.button_down(PointerButton::Secondary)
+                || i.pointer.button_down(PointerButton::Middle)
+        });
+        if is_pan_button_down && response.dragged() {
+            viewport_changed = true;
+
+            let drag = response.drag_delta();
+
+            let dx_world = drag.x / ui_rect.width() * width;
+            let dy_world = drag.y / ui_rect.height() * height;
+
+            viewport_bounds[0] -= dx_world;
+            viewport_bounds[2] -= dx_world;
+
+            viewport_bounds[1] -= dy_world;
+            viewport_bounds[3] -= dy_world;
+        }
+
+        //
+        // Zoom
+        //
+        let scroll = response.ctx.input(|i| i.raw_scroll_delta.y);
+
+        if scroll.abs() > 0.0 {
+            if let Some(mouse_pos) = response.hover_pos() {
+                let nx = (mouse_pos.x - ui_rect.left()) / ui_rect.width();
+                let ny = (mouse_pos.y - ui_rect.top()) / ui_rect.height();
+
+                let mouse_world_x =
+                    viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
+
+                let mouse_world_y =
+                    viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
+
+                {
+                    // Do not zoom if we are already zoomed in rather far
+                    let zoom_factor = if scroll > 0.0 { 0.9 } else { 1.1 };
+
+                    let width = viewport_bounds[2] - viewport_bounds[0];
+                    let height = viewport_bounds[3] - viewport_bounds[1];
+
+                    const MAX_ZOOM_FACTOR: f32 = 7.0;
+                    const WORLD_SIZE: f32 = 2.0; // [-1, 1]
+
+                    let min_width = WORLD_SIZE / MAX_ZOOM_FACTOR;
+                    let min_height = WORLD_SIZE / MAX_ZOOM_FACTOR;
+
+                    let new_width = width * zoom_factor;
+                    let new_height = height * zoom_factor;
+
+                    // Prevent further zoom-in once maximum zoom is reached.
+                    if scroll > 0.0 && (new_width < min_width || new_height < min_height) {
+                        // early return to guard against very deep zooms, viewport not changed
+                        return viewport_changed;
+                    }
+                }
+                viewport_changed = true;
+
+                let zoom_factor = if scroll > 0.0 { 0.9 } else { 1.1 };
+
+                viewport_bounds[0] =
+                    mouse_world_x + (viewport_bounds[0] - mouse_world_x) * zoom_factor;
+
+                viewport_bounds[2] =
+                    mouse_world_x + (viewport_bounds[2] - mouse_world_x) * zoom_factor;
+
+                viewport_bounds[1] =
+                    mouse_world_y + (viewport_bounds[1] - mouse_world_y) * zoom_factor;
+
+                viewport_bounds[3] =
+                    mouse_world_y + (viewport_bounds[3] - mouse_world_y) * zoom_factor;
+            }
+        }
+        if viewport_changed {
+            CachedPicker::clamp_viewport(viewport_bounds)
+        }
+        viewport_changed
+    }
+
+    fn clamp_viewport(viewport: &mut [f32; 4]) {
+        let min_world = -1.0;
+        let max_world = 1.0;
+
+        let mut min_x = viewport[0];
+        let mut min_y = viewport[1];
+        let mut max_x = viewport[2];
+        let mut max_y = viewport[3];
+
+        let width = max_x - min_x;
+        let height = max_y - min_y;
+
+        // -------------------------
+        // 1. Clamp zoom FIRST (uniform bounds)
+        // -------------------------
+        let max_width = max_world - min_world;
+        let max_height = max_world - min_world;
+
+        let width = width.min(max_width);
+        let height = height.min(max_height);
+
+        // compute center BEFORE correction
+        let cx = (min_x + max_x) * 0.5;
+        let cy = (min_y + max_y) * 0.5;
+
+        // rebuild viewport around center (this fixes drift)
+        min_x = cx - width * 0.5;
+        max_x = cx + width * 0.5;
+        min_y = cy - height * 0.5;
+        max_y = cy + height * 0.5;
+
+        // -------------------------
+        // 2. Clamp position (shift as a block)
+        // -------------------------
+        let dx_left = min_world - min_x;
+        let dx_right = max_world - max_x;
+
+        if dx_left > 0.0 {
+            min_x += dx_left;
+            max_x += dx_left;
+        } else if dx_right < 0.0 {
+            min_x += dx_right;
+            max_x += dx_right;
+        }
+
+        let dy_bottom = min_world - min_y;
+        let dy_top = max_world - max_y;
+
+        if dy_bottom > 0.0 {
+            min_y += dy_bottom;
+            max_y += dy_bottom;
+        } else if dy_top < 0.0 {
+            min_y += dy_top;
+            max_y += dy_top;
+        }
+
+        viewport[0] = min_x;
+        viewport[1] = min_y;
+        viewport[2] = max_x;
+        viewport[3] = max_y;
+    }
+
+    fn calculate_coordinates(size: Vec2, viewport_bounds: [f32; 4]) -> Vec<Pos2> {
+        let pixels_w = size.x as usize;
+        let pixels_h = size.y as usize;
+        let mut coords: Vec<Pos2> = Vec::with_capacity(pixels_w * pixels_h);
+
+        for i_y in 0..pixels_h {
+            for i_x in 0..pixels_w {
+                let nx = (i_x as f32 + 0.5) / pixels_w as f32;
+                let ny = (i_y as f32 + 0.5) / pixels_h as f32;
+                let x = viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
+                let y = viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
+                coords.push(Pos2 { x, y });
+            }
+        }
+        coords
+    }
+
+    fn calculate_border_from_pixels(size: Vec2, pixels: &Vec<u8>) -> Vec<Pos2> {
+        // Note: same as polar version, consider unifying
+        let pixels_w = size.x as usize;
+        let pixels_h = size.y as usize;
+        let mut border_positions = Vec::new();
+        for y in 1..pixels_h - 1 {
+            for x in 1..pixels_w - 1 {
+                let i = (y * pixels_w + x) * 4;
+
+                let valid = pixels[i + 3] != 0;
+                if !valid {
+                    continue;
+                }
+
+                let mut neighbor_invalid = false;
+
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        if dx == 0 && dy == 0 {
+                            continue;
+                        }
+
+                        let nx = (x as i32 + dx) as usize;
+                        let ny = (y as i32 + dy) as usize;
+
+                        let ni = (ny * pixels_w + nx) * 4;
+
+                        if pixels[ni + 3] == 0 {
+                            neighbor_invalid = true;
+                            break;
+                        }
+                    }
+                    if neighbor_invalid {
+                        break;
+                    }
+                }
+
+                if neighbor_invalid {
+                    border_positions.push(Pos2 {
+                        x: x as f32,
+                        y: y as f32,
+                    });
+                }
+            }
+        }
+        border_positions
+    }
+
+    fn calculate_color_per_pixel(
+        coordinates: &[Pos2],
+        size: &Vec2,
+        stable_value: f32,
+        color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
+    ) -> Vec<u8> {
+        let pixels_w = size.x as usize;
+        let pixels_h = size.y as usize;
+
+        let mut pixels = vec![0 as u8; pixels_w * pixels_h * 4];
+
+        for i_y in 0..pixels_h {
+            for i_x in 0..pixels_w {
+                let i = i_y * pixels_w + i_x;
+                let coord = coordinates[i];
+
+                let (is_valid, color) = color_at(coord.x, coord.y, stable_value);
+
+                if is_valid {
+                    let i = (i_y * pixels_w + i_x) * 4;
+                    pixels[i] = color.r();
+                    pixels[i + 1] = color.g();
+                    pixels[i + 2] = color.b();
+                    pixels[i + 3] = color.a();
+                }
+            }
+        }
+        pixels
+    }
+
+    fn nearest_valid_border_coord(&self, coord: Pos2) -> Option<Pos2> {
+        let mut min_distance = f32::MAX;
+        let mut min_distance_i = 0;
+        let mut found_nothing = true;
+        let border_positions = self.border_positions.clone();
+        for (i, border_coord) in border_positions.iter().enumerate() {
+            let distance =
+                ((coord.x - border_coord.x).powi(2) + (coord.y - border_coord.y).powi(2)).sqrt();
+            if distance < min_distance {
+                min_distance_i = i;
+                min_distance = distance;
+                found_nothing = false;
+            }
+        }
+        if found_nothing {
+            return None;
+        } else {
+            return Some(border_positions[min_distance_i]);
+        }
+    }
+
+    fn nearest_valid_color(
+        &self,
+        coord: Pos2,
+        invert_radial_value: bool,
+        color_at: impl Fn(f32, f32, f32) -> (bool, Color32), // TODO: move to self as function pointer
+    ) -> Color32 {
+        // Here we could sample the pixels vec, but we can also determine the color
+        // based on coordinates. This makes the function less pleasant to use, as we
+        // have to supply the color_at closure, but we would then not need to save
+        // a copy of the texture in RAM.
+        let stable_value = self.stable_value_bits as f32 / 10000.;
+
+        // If color exists at provided values, return the color
+        let (is_valid, color) = color_at(coord.x, coord.y, stable_value);
+        if is_valid {
+            return color;
+        }
+
+        // If color does not exist, return nearest color
+        let sample_pos = self.nearest_valid_border_coord(coord);
+        let fallback_color = Color32::BLACK; // Take a look at the values where no possibilities left, what is the last color to disappear? Use that!
+        let color = match sample_pos {
+            None => fallback_color,
+            Some(sample_pos) => {
+                let (_, color) = color_at(sample_pos.x, sample_pos.y, stable_value);
+                color
+            }
+        };
+        color
+    }
+}
+
 pub fn polar_to_pixel(
     angle: f32,
     radius: f32,
@@ -1230,10 +1658,10 @@ fn color_slider_2d_radial(
             );
         }
 
+        // Maybe unify with conditions above
         let viewport_changed =
             CachedPicker::update_viewport_bounds(&response, rect, &mut picker_info.viewport_bounds);
         if viewport_changed {
-            // picker_info.viewport_bounds = new_viewport_bounds;
             picker_info.update_polar_coordinates(size);
             picker_info.update_pixel_values_and_border_positions(
                 stable_value,
@@ -1249,7 +1677,7 @@ fn color_slider_2d_radial(
         };
 
         let tex = picker_info.texture.clone();
-        ui.painter().image(
+        painter.image(
             tex.id(),
             rect,
             Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
@@ -1424,9 +1852,6 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
         {
             tab = OKLabPlotType::StableHue;
             tab_switched = true;
-            // state.l = lch.l;
-            // state.c = lch.c / 0.325;
-            // state.h = lch.h / std::f32::consts::TAU;
         }
         if ui
             .selectable_label(matches!(tab, OKLabPlotType::StableChroma), "Hue/Lightness")
@@ -1434,9 +1859,6 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
         {
             tab = OKLabPlotType::StableChroma;
             tab_switched = true;
-            // state.l = lch.l;
-            // state.c = lch.c / 0.325;
-            // state.h = lch.h / std::f32::consts::TAU;
         }
         if ui
             .selectable_label(matches!(tab, OKLabPlotType::StableLightness), "Hue/Chroma")
@@ -1444,9 +1866,6 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
         {
             tab = OKLabPlotType::StableLightness;
             tab_switched = true;
-            // state.l = lch.l;
-            // state.c = lch.c / 0.325;
-            // state.h = lch.h / std::f32::consts::TAU;
         }
     });
 
@@ -1492,18 +1911,20 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
 
     let new_color = match tab {
         OKLabPlotType::StableHue => {
+            let ui_identifyable_label = "StableHueColorPicker";
             color_slider_2d_grid_oklch(
                 ui,
-                &mut state.l,
                 &mut state.c,
+                &mut state.l,
                 state.h * std::f32::consts::TAU,
-                |l, c, h| {
+                |x, y, h| {
                     oklch_to_color32(Oklch {
-                        l,
-                        c: c * 0.325, // match your chroma scaling
+                        l: 1.0 - y,
+                        c: x * 0.325,
                         h,
                     })
                 },
+                ui_identifyable_label,
             );
             Color32::CYAN
         }
