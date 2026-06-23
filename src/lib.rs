@@ -27,11 +27,6 @@ fn contrast_color(color: impl Into<Rgba>) -> Color32 {
     }
 }
 
-/// Number of vertices per dimension in the color sliders.
-/// We need at least 6 for hues, and more for smooth 2D areas.
-/// Should always be a multiple of 6 to hit the peak hues in HSV/HSL (every 60°).
-const N: u32 = 6 * 6;
-
 /// In rust, & is the remainder, not the modulus
 fn modulus(val: f32, modulus: f32) -> f32 {
     ((val % modulus) + modulus) % modulus
@@ -62,8 +57,9 @@ fn background_checkers(painter: &Painter, rect: Rect, ny: u32) {
     let mut top = true;
     for i_y in 0..ny {
         for mut i_x in (0..nx).step_by(2) {
+            // Offset every other cell
             if modulus(i_x as f32 + i_y as f32, 2.) == 0. {
-                i_x += 1; // Offset cell
+                i_x += 1;
             }
             let x = lerp(rect.left()..=rect.right(), i_x as f32 / nx as f32);
             let cell_top = rect.top() + i_y as f32 * checker_size;
@@ -73,38 +69,6 @@ fn background_checkers(painter: &Painter, rect: Rect, ny: u32) {
         }
     }
     painter.add(Shape::mesh(mesh));
-}
-
-/// Show a color with background checkers to demonstrate transparency (if any).
-pub fn show_color(ui: &mut Ui, color: impl Into<Color32>, desired_size: Vec2) -> Response {
-    show_color32(ui, color.into(), desired_size)
-}
-
-fn show_color32(ui: &mut Ui, color: Color32, desired_size: Vec2) -> Response {
-    let (rect, response) = ui.allocate_at_least(desired_size, Sense::hover());
-    if ui.is_rect_visible(rect) {
-        show_color_at(ui.painter(), color, rect);
-    }
-    response
-}
-
-/// Show a color with background checkers to demonstrate transparency (if any).
-pub fn show_color_at(painter: &Painter, color: Color32, rect: Rect) {
-    if color.is_opaque() {
-        painter.rect_filled(rect, 0.0, color);
-    } else {
-        // Transparent: how both the transparent and opaque versions of the color
-        background_checkers(painter, rect, 4);
-
-        if color == Color32::TRANSPARENT {
-            // There is no opaque version, so just show the background checkers
-        } else {
-            let left = Rect::from_min_max(rect.left_top(), rect.center_bottom());
-            let right = Rect::from_min_max(rect.center_top(), rect.right_bottom());
-            painter.rect_filled(left, 0.0, color);
-            painter.rect_filled(right, 0.0, color.to_opaque());
-        }
-    }
 }
 
 /// Show a color with background checkers to demonstrate transparency (if any).
@@ -157,68 +121,12 @@ fn color_button(ui: &mut Ui, srgba: [u8; 4], open: bool) -> Response {
     response
 }
 
-fn color_slider_1d(ui: &mut Ui, value: &mut f32, color_at: impl Fn(f32) -> Color32) -> Response {
-    #![expect(clippy::identity_op)]
-
-    let desired_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
-    let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
-
-    if let Some(mpos) = response.interact_pointer_pos() {
-        *value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
-    }
-
-    if ui.is_rect_visible(rect) {
-        let visuals = ui.style().interact(&response);
-
-        background_checkers(ui.painter(), rect, 4); // for alpha:
-
-        {
-            // fill color:
-            let mut mesh = Mesh::default();
-            for i in 0..=N {
-                let t = i as f32 / (N as f32);
-                let color = color_at(t);
-                let x = lerp(rect.left()..=rect.right(), t);
-                mesh.colored_vertex(pos2(x, rect.top()), color);
-                mesh.colored_vertex(pos2(x, rect.bottom()), color);
-                if i < N {
-                    mesh.add_triangle(2 * i + 0, 2 * i + 1, 2 * i + 2);
-                    // mesh.add_triangle(2 * i + 1, 2 * i + 2, 2 * i + 3);
-                }
-            }
-            ui.painter().add(Shape::mesh(mesh));
-        }
-
-        ui.painter()
-            .rect_stroke(rect, 0.0, visuals.bg_stroke, StrokeKind::Inside); // outline
-
-        {
-            // Show where the slider is at:
-            let x = lerp(rect.left()..=rect.right(), *value);
-            let r = rect.height() / 4.0;
-            let picked_color = color_at(*value);
-            ui.painter().add(Shape::convex_polygon(
-                vec![
-                    pos2(x, rect.center().y),   // tip
-                    pos2(x + r, rect.bottom()), // right bottom
-                    pos2(x - r, rect.bottom()), // left bottom
-                ],
-                picked_color,
-                Stroke::new(visuals.fg_stroke.width, contrast_color(picked_color)),
-            ));
-        }
-    }
-
-    response
-}
-
 #[derive(Debug, Clone)]
 struct OklchUiState {
     // normalized 0..1
     l: f32,
     c: f32,
     h: f32,
-    previous_color: Oklch,
 }
 
 fn color_slider_1d_grid(
@@ -232,19 +140,6 @@ fn color_slider_1d_grid(
 ) -> Response {
     let desired_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
-
-    // let state_id = ui.id().with(("oklch_ui_state", axis_name));
-
-    // // Todo: base default on color value
-    // // Todo: also store the previous color. If the color changed beneath us, reset state to match new color
-    // let mut state: OklchUiState =
-    //     ui.data(|d| d.get_temp::<OklchUiState>(state_id))
-    //         .unwrap_or(OklchUiState {
-    //             l: 0.5,
-    //             c: 0.5,
-    //             h: 0.5,
-    //             previous_color: color_at(*value),
-    //         });
 
     if let Some(mpos) = response.interact_pointer_pos() {
         *slider_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
@@ -384,89 +279,6 @@ fn color_slider_1d_grid(
             Color32::WHITE,
             Stroke::new(visuals.fg_stroke.width, Color32::BLACK),
         ));
-        // ui.painter().add(Shape::convex_polygon(
-        //     vec![
-        //         pos2(x + r / 2., rect.top()),
-        //         pos2(x, rect.top() + r),
-        //         pos2(x - r / 2., rect.top()),
-        //     ],
-        //     current_color,
-        //     Stroke::new(visuals.fg_stroke.width, contrast_color(current_color)),
-        // ));
-        // ui.painter().add(Shape::convex_polygon(
-        //     vec![
-        //         pos2(x + r / 2., rect.bottom()),
-        //         pos2(x, rect.bottom() - r),
-        //         pos2(x - r / 2., rect.bottom()),
-        //     ],
-        //     current_color,
-        //     Stroke::new(visuals.fg_stroke.width, contrast_color(current_color)),
-        // ));
-    }
-
-    response
-}
-
-/// # Arguments
-/// * `x_value` - X axis, either saturation or value (0.0-1.0).
-/// * `y_value` - Y axis, either saturation or value (0.0-1.0).
-/// * `color_at` - A function that dictates how the mix of saturation and value will be displayed in the 2d slider.
-///
-/// e.g.: `|x_value, y_value| HsvaGamma { h: 1.0, s: x_value, v: y_value, a: 1.0 }.into()` displays the colors as follows:
-/// * top-left: white `[s: 0.0, v: 1.0]`
-/// * top-right: fully saturated color `[s: 1.0, v: 1.0]`
-/// * bottom-right: black `[s: 0.0, v: 1.0].`
-fn color_slider_2d(
-    ui: &mut Ui,
-    x_value: &mut f32,
-    y_value: &mut f32,
-    color_at: impl Fn(f32, f32) -> Color32,
-) -> Response {
-    let desired_size = Vec2::splat(ui.spacing().slider_width);
-    let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
-
-    if let Some(mpos) = response.interact_pointer_pos() {
-        *x_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
-        *y_value = remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
-    }
-
-    if ui.is_rect_visible(rect) {
-        let visuals = ui.style().interact(&response);
-        let mut mesh = Mesh::default();
-
-        for xi in 0..=N {
-            for yi in 0..=N {
-                let xt = xi as f32 / (N as f32);
-                let yt = yi as f32 / (N as f32);
-                let color = color_at(xt, yt);
-                let x = lerp(rect.left()..=rect.right(), xt);
-                let y = lerp(rect.bottom()..=rect.top(), yt);
-                mesh.colored_vertex(pos2(x, y), color);
-
-                if xi < N && yi < N {
-                    let x_offset = 1;
-                    let y_offset = N + 1;
-                    let tl = yi * y_offset + xi;
-                    mesh.add_triangle(tl, tl + x_offset, tl + y_offset);
-                    mesh.add_triangle(tl + x_offset, tl + y_offset, tl + y_offset + x_offset);
-                }
-            }
-        }
-        ui.painter().add(Shape::mesh(mesh)); // fill
-
-        ui.painter()
-            .rect_stroke(rect, 0.0, visuals.bg_stroke, StrokeKind::Inside); // outline
-
-        // Show where the slider is at:
-        let x = lerp(rect.left()..=rect.right(), *x_value);
-        let y = lerp(rect.bottom()..=rect.top(), *y_value);
-        let picked_color = color_at(*x_value, *y_value);
-        ui.painter().add(epaint::CircleShape {
-            center: pos2(x, y),
-            radius: rect.width() / 12.0,
-            fill: picked_color,
-            stroke: Stroke::new(visuals.fg_stroke.width, contrast_color(picked_color)),
-        });
     }
 
     response
@@ -594,150 +406,6 @@ pub enum Alpha {
     /// Show both blend and additive options.
     BlendOrAdditive,
 }
-
-// fn oklch_to_color32(c: Oklch) -> Color32 {
-//     let srgb = linear_srgb_to_srgb(oklab_to_linear_srgb(oklch_to_oklab(c)));
-
-//     Color32::from_rgb(
-//         (srgb.r * 255.) as u8,
-//         (srgb.g * 255.) as u8,
-//         (srgb.b * 255.) as u8,
-//     )
-// }
-
-// fn color_picker_hsvag_2d(ui: &mut Ui, hsvag: &mut HsvaGamma, alpha: Alpha) {
-//     use egui::style::NumericColorSpace;
-
-//     let alpha_control = if is_additive_alpha(hsvag.a) {
-//         Alpha::Opaque // no alpha control for additive colors
-//     } else {
-//         alpha
-//     };
-
-//     match ui.style().visuals.numeric_color_space {
-//         NumericColorSpace::GammaByte => {
-//             let mut srgba_unmultiplied = Hsva::from(*hsvag).to_srgba_unmultiplied();
-//             // Only update if changed to avoid rounding issues.
-//             if srgba_edit_ui(ui, &mut srgba_unmultiplied, alpha_control) {
-//                 if is_additive_alpha(hsvag.a) {
-//                     let alpha = hsvag.a;
-
-//                     *hsvag = HsvaGamma::from(Hsva::from_additive_srgb([
-//                         srgba_unmultiplied[0],
-//                         srgba_unmultiplied[1],
-//                         srgba_unmultiplied[2],
-//                     ]));
-
-//                     // Don't edit the alpha:
-//                     hsvag.a = alpha;
-//                 } else {
-//                     // Normal blending.
-//                     *hsvag = HsvaGamma::from(Hsva::from_srgba_unmultiplied(srgba_unmultiplied));
-//                 }
-//             }
-//         }
-
-//         NumericColorSpace::Linear => {
-//             let mut rgba_unmultiplied = Hsva::from(*hsvag).to_rgba_unmultiplied();
-//             // Only update if changed to avoid rounding issues.
-//             if rgba_edit_ui(ui, &mut rgba_unmultiplied, alpha_control) {
-//                 if is_additive_alpha(hsvag.a) {
-//                     let alpha = hsvag.a;
-
-//                     *hsvag = HsvaGamma::from(Hsva::from_rgb([
-//                         rgba_unmultiplied[0],
-//                         rgba_unmultiplied[1],
-//                         rgba_unmultiplied[2],
-//                     ]));
-
-//                     // Don't edit the alpha:
-//                     hsvag.a = alpha;
-//                 } else {
-//                     // Normal blending.
-//                     *hsvag = HsvaGamma::from(Hsva::from_rgba_unmultiplied(
-//                         rgba_unmultiplied[0],
-//                         rgba_unmultiplied[1],
-//                         rgba_unmultiplied[2],
-//                         rgba_unmultiplied[3],
-//                     ));
-//                 }
-//             }
-//         }
-//     }
-
-//     let current_color_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
-//     show_srgba_unmultiplied(
-//         ui,
-//         Hsva::from(*hsvag).to_srgba_unmultiplied(),
-//         current_color_size,
-//     )
-//     .on_hover_text("Selected color");
-
-//     if alpha == Alpha::BlendOrAdditive {
-//         let a = &mut hsvag.a;
-//         let mut additive = is_additive_alpha(*a);
-//         ui.horizontal(|ui| {
-//             ui.label("Blending:");
-//             ui.radio_value(&mut additive, false, "Normal");
-//             ui.radio_value(&mut additive, true, "Additive");
-
-//             if additive {
-//                 *a = -a.abs();
-//             }
-
-//             if !additive {
-//                 *a = a.abs();
-//             }
-//         });
-//     }
-
-//     let opaque = HsvaGamma { a: 1.0, ..*hsvag };
-
-//     let HsvaGamma { h, s, v, a: _ } = hsvag;
-
-//     if false {
-//         color_slider_1d(ui, s, |s| HsvaGamma { s, ..opaque }.into()).on_hover_text("Saturation");
-//     }
-
-//     if false {
-//         color_slider_1d(ui, v, |v| HsvaGamma { v, ..opaque }.into()).on_hover_text("Value");
-//     }
-
-//     // color_slider_2d(ui, s, v, |s, v| HsvaGamma { s, v, ..opaque }.into());
-//     color_slider_2d_grid(ui, s, v, |s, v| HsvaGamma { s, v, ..opaque }.into());
-
-//     color_slider_1d_grid(ui, h, |h| {
-//         oklch_to_color32(
-//             Oklch {
-//                 l: 0.75,
-//                 c: 0.15,
-//                 h: h * std::f32::consts::TAU,
-//             },
-//             "osgsoe".into(),
-//         )
-//     })
-//     .on_hover_text("Hue");
-
-//     let additive = is_additive_alpha(hsvag.a);
-
-//     if alpha == Alpha::Opaque {
-//         hsvag.a = 1.0;
-//     } else {
-//         let a = &mut hsvag.a;
-
-//         if alpha == Alpha::OnlyBlend {
-//             if is_additive_alpha(*a) {
-//                 *a = 0.5; // was additive, but isn't allowed to be
-//             }
-//             color_slider_1d(ui, a, |a| HsvaGamma { a, ..opaque }.into()).on_hover_text("Alpha");
-//         } else if !additive {
-//             color_slider_1d(ui, a, |a| HsvaGamma { a, ..opaque }.into()).on_hover_text("Alpha");
-//         }
-//     }
-// }
-//
-//
-//
 
 fn color_slider_2d_grid_oklch(
     ui: &mut Ui,
@@ -895,48 +563,6 @@ struct PolarCoordinate {
     radius: f32,
     angle: f32,
 }
-
-// #[derive(Clone, Copy, Hash, PartialEq, Eq)]
-// struct PolarCoordinateCacheKey {
-//     width: usize,
-//     height: usize,
-// }
-
-// #[derive(Default)]
-// struct PolarCoordinateCache;
-
-// impl ComputerMut<PolarCoordinateCacheKey, Arc<[PolarCoordinate]>> for PolarCoordinateCache {
-//     fn compute(&mut self, key: PolarCoordinateCacheKey) -> Arc<[PolarCoordinate]> {
-//         let pixels_w = key.width;
-//         let pixels_h = key.height;
-
-//         let mut coords: Vec<PolarCoordinate> = Vec::with_capacity(pixels_w * pixels_h);
-
-//         let radius_px = pixels_w.min(pixels_h) as f32 * 0.5;
-//         let cx = pixels_w as f32 * 0.5;
-//         let cy = pixels_h as f32 * 0.5;
-//         for i_y in 0..pixels_h {
-//             for i_x in 0..pixels_w {
-//                 let dx = (i_x as f32 + 0.5) - cx;
-//                 let dy = (i_y as f32 + 0.5) - cy;
-
-//                 let x_normalized = dx / radius_px;
-//                 let y_normalized = dy / radius_px;
-
-//                 let r_squared = x_normalized * x_normalized + y_normalized * y_normalized;
-//                 let r = r_squared.sqrt();
-
-//                 let mut angle = (-y_normalized).atan2(x_normalized);
-//                 if angle < 0.0 {
-//                     angle += std::f32::consts::TAU;
-//                 }
-
-//                 coords.push(PolarCoordinate { radius: r, angle });
-//             }
-//         }
-//         Arc::from(coords)
-//     }
-// }
 
 #[derive(Clone)]
 struct CachedPicker {
@@ -1358,70 +984,6 @@ impl CachedPicker {
     }
 }
 
-// #[derive(Clone, Copy, Hash, PartialEq, Eq)]
-// struct RadialBorderCoordinateCacheKey {
-//     width: usize,
-//     height: usize,
-//     stable_value: u32,
-//     ui_identifyable_label: &str,
-// }
-
-// #[derive(Default)]
-// struct RadialBorderCoordinateCache;
-
-// impl ComputerMut<RadialBorderCoordinateCacheKey, Arc<[PolarCoordinate]>> for RadialBorderCoordinateCache {
-//     fn compute(&mut self, key: RadialBorderCoordinateCacheKey) -> Arc<[PolarCoordinate]> {
-//         let pixels_w = key.width;
-//         let pixels_h = key.height;
-//         let stable_value = key.stable_value as f32 / 10000.;
-
-//         // TIMO LEFT HERE:
-//         // I somehow need to have access to pixels. This is stored as tex handle,
-//         // not as vec. I can try to also store a vec, but even then I'd need to access
-//         // the cache. Maybe consider a OnceCell or other global?
-
-//         let mut border_positions = Vec::new();
-//         for y in 1..pixels_h - 1 {
-//             for x in 1..pixels_h - 1 {
-//                 let i = (y * pixels_w + x) * 4;
-
-//                 let valid = pixels[i + 3] != 0;
-//                 if !valid {
-//                     continue;
-//                 }
-
-//                 let mut neighbor_invalid = false;
-
-//                 for dy in -1i32..=1 {
-//                     for dx in -1i32..=1 {
-//                         if dx == 0 && dy == 0 {
-//                             continue;
-//                         }
-
-//                         let nx = (x as i32 + dx) as usize;
-//                         let ny = (y as i32 + dy) as usize;
-
-//                         let ni = (ny * pixels_w + nx) * 4;
-
-//                         if pixels[ni + 3] == 0 {
-//                             neighbor_invalid = true;
-//                             break;
-//                         }
-//                     }
-//                     if neighbor_invalid {
-//                         break;
-//                     }
-//                 }
-
-//                 if neighbor_invalid {
-//                     border_positions.push((x,y));
-//                 }
-//             }
-//         }
-//         Arc::from(border_positions)
-//     }
-// }
-
 pub fn polar_to_pixel(
     angle: f32,
     radius: f32,
@@ -1476,62 +1038,6 @@ pub fn pixel_to_polar(
 
     PolarCoordinate { radius: r, angle }
 }
-
-// pub fn nearest_lch_color(
-//     pixels: &[u8],
-//     width: usize,
-//     height: usize,
-//     start_x: usize,
-//     start_y: usize,
-//     mut to_lch: impl Fn(usize, usize) -> Oklch,
-// ) -> Option<Oklch> {
-//     // Helper: check if pixel is valid
-//     let is_valid = |x: usize, y: usize| -> bool {
-//         let i = (y * width + x) * 4;
-//         pixels[i + 3] != 0
-//     };
-
-//     // Clamp start position
-//     let start_x = start_x.min(width.saturating_sub(1));
-//     let start_y = start_y.min(height.saturating_sub(1));
-
-//     // If starting point is valid, return immediately
-//     if is_valid(start_x, start_y) {
-//         return Some(to_lch(start_x, start_y));
-//     }
-
-//     // Ring search outward
-//     let max_radius = width.max(height); // Anythin outside r==1 is anyway not valid color space
-
-//     for r in 1..max_radius {
-//         let x0 = start_x.saturating_sub(r);
-//         let x1 = (start_x + r).min(width - 1);
-//         let y0 = start_y.saturating_sub(r);
-//         let y1 = (start_y + r).min(height - 1);
-
-//         // top + bottom edges
-//         for x in x0..=x1 {
-//             if y0 < height && is_valid(x, y0) {
-//                 return Some(to_lch(x, y0));
-//             }
-//             if y1 < height && is_valid(x, y1) {
-//                 return Some(to_lch(x, y1));
-//             }
-//         }
-
-//         // left + right edges (excluding corners already checked)
-//         for y in (y0 + 1)..y1 {
-//             if x0 < width && is_valid(x0, y) {
-//                 return Some(to_lch(x0, y));
-//             }
-//             if x1 < width && is_valid(x1, y) {
-//                 return Some(to_lch(x1, y));
-//             }
-//         }
-//     }
-
-//     None
-// }
 
 struct Pos {
     x: usize,
@@ -1614,11 +1120,6 @@ pub fn tex_coord_to_lch(
     // normalize to 0..1 texture space
     let u = x as f32 / (width as f32 - 1.0);
     let v = y as f32 / (height as f32 - 1.0);
-
-    // interpret (u,v) as your 2D parameter space
-    // NOTE: this assumes:
-    // u -> angle
-    // v -> radius (or vice versa depending on your design)
 
     let angle = u;
     let radius = if invert_radial_value { 1.0 - v } else { v };
@@ -1822,7 +1323,6 @@ fn color_slider_2d_radial(
                 // radius: *radial_value,
                 angle,
             });
-            dbg!(&picker_info.prev_fallback_color_pos);
         } else {
             let fallback_color_pos = if viewport_contains_picked_color {
                 let fallback_color_pos = picker_info.nearest_valid_border_coord(r, angle);
@@ -1906,7 +1406,6 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
                 l: 0.5,
                 c: 0.5,
                 h: 0.5,
-                previous_color: lch.clone(),
             });
 
     let l = state.l;
@@ -2263,35 +1762,6 @@ fn rgba_edit_ui(ui: &mut Ui, [r, g, b, a]: &mut [f32; 4], alpha: Alpha) -> bool 
     edited
 }
 
-// /// Shows a color picker where the user can change the given [`Hsva`] color.
-// ///
-// /// Returns `true` on change.
-// pub fn color_picker_hsva_2d(ui: &mut Ui, hsva: &mut Hsva, alpha: Alpha) -> bool {
-//     let mut hsvag = HsvaGamma::from(*hsva);
-//     ui.vertical(|ui| {
-//         color_picker_hsvag_2d(ui, &mut hsvag, alpha);
-//     });
-//     let new_hasva = Hsva::from(hsvag);
-//     if *hsva == new_hasva {
-//         false
-//     } else {
-//         *hsva = new_hasva;
-//         true
-//     }
-// }
-
-// /// Shows a color picker where the user can change the given [`Color32`] color.
-// ///
-// /// Returns `true` on change.
-// pub fn color_picker_color32(ui: &mut Ui, srgba: &mut Color32, alpha: Alpha) -> bool {
-//     // let mut hsva = color_cache_get(ui.ctx(), *srgba);
-//     let mut hsva: Hsva =
-//         Hsva::from_srgba_premultiplied([srgba.r(), srgba.g(), srgba.b(), srgba.a()]);
-//     let changed = color_picker_hsva_2d(ui, &mut hsva, alpha);
-//     *srgba = Color32::from(hsva);
-//     changed
-// }
-
 pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Color32) -> Response {
     let popup_id = ui.auto_id_with("popup");
     let open = Popup::is_id_open(ui.ctx(), popup_id);
@@ -2316,7 +1786,6 @@ pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Color32) -> Response {
 }
 
 pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32) -> bool {
-    let prev_color = color.clone();
     let mut new_lch = color32_to_oklch(*color);
     let mut new_alpha = color.a() as f32 / 255.0;
 
@@ -2325,93 +1794,6 @@ pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32) -> bool {
     if update_color {
         *color = new_color;
     }
-    // *color = Color32::from_rgba_unmultiplied(
-    //     (srgb.r * 255.0).round() as u8,
-    //     (srgb.g * 255.0).round() as u8,
-    //     (srgb.b * 255.0).round() as u8,
-    //     (new_alpha * 255.0).round() as u8,
-    // );
-    if *color == prev_color { false } else { true }
+
+    update_color
 }
-
-// pub fn color_edit_button_hsva(ui: &mut Ui, hsva: &mut Hsva, alpha: Alpha) -> Response {
-//     let popup_id = ui.auto_id_with("popup");
-//     let open = Popup::is_id_open(ui.ctx(), popup_id);
-//     let mut button_response = color_button(ui, hsva.to_srgba_unmultiplied(), open);
-//     if ui.style().explanation_tooltips {
-//         button_response = button_response.on_hover_text("Click to edit color");
-//     }
-
-//     const COLOR_SLIDER_WIDTH: f32 = 275.0;
-
-//     Popup::menu(&button_response)
-//         .id(popup_id)
-//         .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
-//         .show(|ui| {
-//             ui.spacing_mut().slider_width = COLOR_SLIDER_WIDTH;
-//             if color_picker_hsva_2d(ui, hsva, alpha) {
-//                 button_response.mark_changed();
-//             }
-//         });
-
-//     button_response
-// }
-
-// /// Shows a button with the given color.
-// /// If the user clicks the button, a full color picker is shown.
-// pub fn color_edit_button_srgba(ui: &mut Ui, srgba: &mut Color32, alpha: Alpha) -> Response {
-//     let mut hsva: Hsva =
-//         Hsva::from_srgba_premultiplied([srgba.r(), srgba.g(), srgba.b(), srgba.a()]);
-//     let response = color_edit_button_hsva(ui, &mut hsva, alpha);
-//     *srgba = Color32::from(hsva);
-//     response
-// }
-
-// /// Shows a button with the given color.
-// /// If the user clicks the button, a full color picker is shown.
-// /// The given color is in `sRGB` space.
-// pub fn color_edit_button_srgb(ui: &mut Ui, srgb: &mut [u8; 3]) -> Response {
-//     let mut srgba = Color32::from_rgb(srgb[0], srgb[1], srgb[2]);
-//     let response = color_edit_button_srgba(ui, &mut srgba, Alpha::Opaque);
-//     srgb[0] = srgba[0];
-//     srgb[1] = srgba[1];
-//     srgb[2] = srgba[2];
-//     response
-// }
-
-// /// Shows a button with the given color.
-// /// If the user clicks the button, a full color picker is shown.
-// pub fn color_edit_button_rgba(ui: &mut Ui, rgba: &mut Rgba, alpha: Alpha) -> Response {
-//     let mut hsva: Hsva = Hsva::from_srgba_premultiplied([srgba.r(), srgba.g(), srgba.b(), srgba.a()]);
-//     let response = color_edit_button_hsva(ui, &mut hsva, alpha);
-//     *rgba = Rgba::from(hsva);
-//     response
-// }
-
-// /// Shows a button with the given color.
-// /// If the user clicks the button, a full color picker is shown.
-// pub fn color_edit_button_rgb(ui: &mut Ui, rgb: &mut [f32; 3]) -> Response {
-//     let mut rgba = Rgba::from_rgb(rgb[0], rgb[1], rgb[2]);
-//     let response = color_edit_button_rgba(ui, &mut rgba, Alpha::Opaque);
-//     rgb[0] = rgba[0];
-//     rgb[1] = rgba[1];
-//     rgb[2] = rgba[2];
-//     response
-// }
-
-// // To ensure we keep hue slider when `srgba` is gray we store the full [`Hsva`] in a cache:
-// fn color_cache_get(ctx: &Context, rgba: impl Into<Rgba>) -> Hsva {
-//     let rgba = rgba.into();
-//     use_color_cache(ctx, |cc| cc.get(&rgba).copied()).unwrap_or_else(|| Hsva::from(rgba))
-// }
-
-// // To ensure we keep hue slider when `srgba` is gray we store the full [`Hsva`] in a cache:
-// fn color_cache_set(ctx: &Context, rgba: impl Into<Rgba>, hsva: Hsva) {
-//     let rgba = rgba.into();
-//     use_color_cache(ctx, |cc| cc.set(rgba, hsva));
-// }
-
-// To ensure we keep hue slider when `srgba` is gray we store the full [`Hsva`] in a cache:
-// fn use_color_cache<R>(ctx: &Context, f: impl FnOnce(&mut FixedCache<Rgba, Hsva>) -> R) -> R {
-//     ctx.data_mut(|d| f(d.get_temp_mut_or_default(Id::NULL)))
-// }
