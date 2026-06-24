@@ -438,7 +438,7 @@ fn color_slider_2d_grid_oklch(
         if let Some(mpos) = response.interact_pointer_pos() {
             // Interaction (x = chroma, y = lightness)
             *x_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
-            *y_value = remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
+            *y_value = 1.0 - remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
         }
     }
 
@@ -475,89 +475,64 @@ fn color_slider_2d_grid_oklch(
             Color32::WHITE,
         );
 
-        // let visuals = ui.style().interact(&response);
-        // painter.rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
-
-        // let pixels_w = size.x as usize;
-        // let pixels_h = size.y as usize;
-
-        // // Fixme: Also dependent on change in l,c,h values, forn now just always rebuild
-        // // let rebuild = tex.is_none() || tex.as_ref().unwrap().size_vec2() != size;
-        // let rebuild = true;
-
-        // if rebuild {
-        //     let mut pixels = Vec::with_capacity(pixels_w * pixels_h * 4);
-
-        //     for y in (0..pixels_h).rev() {
-        //         let lt = y as f32 / (pixels_h as f32 - 1.0); // lightness
-
-        //         for x in 0..pixels_w {
-        //             let ct = x as f32 / (pixels_w as f32 - 1.0); // chroma
-
-        //             let (is_valid, color) = color_at(lt, ct, hue);
-
-        //             let (r, g, b, a) = color.to_tuple();
-
-        //             pixels.push(r);
-        //             pixels.push(g);
-        //             pixels.push(b);
-        //             pixels.push(is_valid as u8);
-        //         }
-        //     }
-
-        //     let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
-
-        //     if tex.is_none() {
-        //         tex = Some(ui.ctx().load_texture(
-        //             "oklch_2d_slider",
-        //             image,
-        //             egui::TextureOptions::LINEAR,
-        //         ));
-        //     }
-
-        //     ui.data_mut(|d| {
-        //         d.insert_temp(tex_id, tex.clone());
-        //     });
-        // }
-
-        // let tex = tex.as_ref().unwrap();
-
-        // // ----------------------------
-        // // Draw texture
-        // // ----------------------------
-        // ui.painter().image(
-        //     tex.id(),
-        //     rect,
-        //     Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-        //     Color32::WHITE,
-        // );
-
-        // ----------------------------
-        // Border
-        // ----------------------------
         let visuals = ui.style().interact(&response);
-        ui.painter()
-            .rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
+        painter.rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
 
-        // ----------------------------
-        // Handle
-        // ----------------------------
-        let x = lerp(rect.left()..=rect.right(), *x_value);
-        let y = lerp(rect.bottom()..=rect.top(), *y_value);
+        let marker_pos = Pos2::new(*x_value * size.x, *y_value * size.y);
+
+        let (is_valid, color) = color_at(*x_value, *y_value, stable_value);
+        color_is_valid = is_valid;
+
+        let (indicator_color, marker_angle) = if is_valid {
+            (Color32::WHITE, 45.)
+        } else {
+            (Color32::WHITE, 0.)
+        };
+
+        viewport_contains_picked_color = response.rect.contains(marker_pos);
 
         draw_inward_triangles(
-            ui.painter(),
-            Pos2::new(x, y),
-            4.0,  // radius
-            4.0,  // size
-            4,    // count
-            45.0, // radial-offset
-            Color32::WHITE,
+            &painter,
+            marker_pos + rect.min.to_vec2(),
+            4.0,
+            4.0,
+            4,
+            marker_angle,
+            indicator_color,
             Stroke {
                 width: 0.5,
                 color: Color32::BLACK,
             },
         );
+        if is_valid {
+            picker_info.prev_fallback_color_pos = Some(marker_pos);
+        } else {
+            let fallback_color_pos = if viewport_contains_picked_color {
+                let fallback_color_pos = picker_info.nearest_valid_border_coord(marker_pos);
+                dbg!(&fallback_color_pos);
+                picker_info.prev_fallback_color_pos = fallback_color_pos;
+                fallback_color_pos // Return xy, not polar
+            } else {
+                picker_info.prev_fallback_color_pos
+            };
+            // let color = picker_info.nearest_valid_color(angle, r, invert_radial_value, &color_at);
+            if let Some(pos) = fallback_color_pos {
+                draw_inward_triangles(
+                    &painter,
+                    pos + rect.min.to_vec2(),
+                    3.0,  // radius
+                    3.0,  // size
+                    4,    // count
+                    45.0, // radial-offset
+                    Color32::WHITE,
+                    Stroke {
+                        width: 0.5,
+                        color: Color32::BLACK,
+                    },
+                );
+            }
+        }
+
         ui.data_mut(|d| {
             d.insert_temp(picker_id, picker_info.clone());
         });
@@ -1044,7 +1019,7 @@ struct CachedPickerCartesian {
     texture: egui::TextureHandle,
     coordinates: Arc<[Pos2]>,
     border_positions: Arc<[Pos2]>,
-    prev_fallback_color_pos: Option<PolarCoordinate>,
+    prev_fallback_color_pos: Option<Pos2>,
 }
 
 impl CachedPickerCartesian {
