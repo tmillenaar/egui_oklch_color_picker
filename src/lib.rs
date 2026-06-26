@@ -414,7 +414,7 @@ fn color_slider_2d_grid_oklch(
     stable_value: f32,
     color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
     ui_identifyable_label: &str,
-) -> Response {
+) -> (Response, bool) {
     let desired_size = Vec2::splat(ui.spacing().slider_width);
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 
@@ -430,15 +430,42 @@ fn color_slider_2d_grid_oklch(
         Some(picker_info) => picker_info,
     };
 
+    let viewport_bounds = picker_info.viewport_bounds;
+
     // Mouse pointer interaction
     let is_lmb_down = response
         .ctx
         .input(|i| i.pointer.button_down(PointerButton::Primary));
     if is_lmb_down {
         if let Some(mpos) = response.interact_pointer_pos() {
-            // Interaction (x = chroma, y = lightness)
-            *x_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
-            *y_value = 1.0 - remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
+            // *x_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
+            // *y_value = 1.0 - remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
+
+            let x_normalized = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
+            let y_normalized = remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
+            // dbg!((x_normalized, y_normalized));
+            // let mouse_coord = pixel_to_coordinates(Pos2 { x, y }, size, viewport_bounds);
+            // *x_value = mouse_coord.x;
+            // *y_value = mouse_coord.y;
+
+            // // 1. normalize mouse in UI space [0,1]
+            // let nx = (mpos.x - response.rect.left());
+            // let ny = (mpos.y - response.rect.top());
+
+            // 2. convert to WORLD space using viewport
+            // let viewport_bounds = picker_info.viewport_bounds;
+            let x = viewport_bounds[0] + x_normalized * (viewport_bounds[2] - viewport_bounds[0]);
+            let y = viewport_bounds[1] + y_normalized * (viewport_bounds[3] - viewport_bounds[1]);
+            // let mouse_coord = pixel_to_coordinates(
+            //     Pos2 {
+            //         x: x_normalized,
+            //         y: y_normalized,
+            //     },
+            //     size,
+            //     viewport_bounds,
+            // );
+            *x_value = x;
+            *y_value = y;
         }
     }
 
@@ -456,15 +483,18 @@ fn color_slider_2d_grid_oklch(
             picker_info.update_coordinates(size);
         }
         if size_changed || stable_value_changed {
-            picker_info.update_pixel_values_and_border_positions(stable_value, &color_at);
+            picker_info.update_pixel_values_and_border_positions_px(stable_value, &color_at);
         }
 
         // Maybe unify with conditions above
-        let viewport_changed =
-            CachedPicker::update_viewport_bounds(&response, rect, &mut picker_info.viewport_bounds);
+        let viewport_changed = CachedPickerCartesian::update_viewport_bounds(
+            &response,
+            rect,
+            &mut picker_info.viewport_bounds,
+        );
         if viewport_changed {
             picker_info.update_coordinates(size);
-            picker_info.update_pixel_values_and_border_positions(stable_value, &color_at);
+            picker_info.update_pixel_values_and_border_positions_px(stable_value, &color_at);
         }
 
         let tex = picker_info.texture.clone();
@@ -478,10 +508,23 @@ fn color_slider_2d_grid_oklch(
         let visuals = ui.style().interact(&response);
         painter.rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
 
-        let marker_pos = Pos2::new(*x_value * size.x, *y_value * size.y);
+        // let nx = (i_x as f32 + 0.5) / pixels_w as f32;
+        // let ny = (i_y as f32 + 0.5) / pixels_h as f32;
+        // let x = viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
+        // let y = viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
+        // let x = *x_value * (viewport_bounds[2] - viewport_bounds[0]) + viewport_bounds[0];
+        // let y = *y_value * (viewport_bounds[3] - viewport_bounds[1]) + viewport_bounds[1];
+        // let x = viewport_bounds[0] + *x_value / (viewport_bounds[2] - viewport_bounds[0]);
+        // let y = viewport_bounds[1] + *y_value / (viewport_bounds[3] - viewport_bounds[1]);
+        let x = (*x_value - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]);
+        // let y = 1.0 - ((*y_value - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]));
+        let y = 1.0 - ((*y_value - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]));
+        // let marker_pos = Pos2::new(*x_value * size.x, *y_value * size.y);
+        let marker_pos = Pos2::new(x * size.x, y * size.y);
 
         let (is_valid, color) = color_at(*x_value, *y_value, stable_value);
         color_is_valid = is_valid;
+        dbg!(&color_is_valid);
 
         let (indicator_color, marker_angle) = if is_valid {
             (Color32::WHITE, 45.)
@@ -489,7 +532,14 @@ fn color_slider_2d_grid_oklch(
             (Color32::WHITE, 0.)
         };
 
-        viewport_contains_picked_color = response.rect.contains(marker_pos);
+        let viewport_bounds = picker_info.viewport_bounds;
+        let nx = (x - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]);
+        let ny = (y - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]);
+        let x_ = response.rect.left() + nx * response.rect.width();
+        let y_ = response.rect.top() + ny * response.rect.height();
+
+        let marker_pos_ = Pos2::new(x_, y_);
+        viewport_contains_picked_color = response.rect.contains(marker_pos_);
 
         draw_inward_triangles(
             &painter,
@@ -504,19 +554,36 @@ fn color_slider_2d_grid_oklch(
                 color: Color32::BLACK,
             },
         );
+        // if false {
         if is_valid {
-            picker_info.prev_fallback_color_pos = Some(marker_pos);
+            picker_info.prev_fallback_color_pos = Some(Pos2 { x, y });
         } else {
             let fallback_color_pos = if viewport_contains_picked_color {
-                let fallback_color_pos = picker_info.nearest_valid_border_coord(marker_pos);
+                // let fallback_color_pos = picker_info.nearest_valid_border_coord(marker_pos);
+                dbg!((x, y));
+                let coord_px = coordinates_to_pixel(Pos2 { x, y }, size, viewport_bounds);
+
+                let fallback_color_pos = picker_info.nearest_valid_border_pixel(coord_px);
+                // let fallback_color_pos = picker_info.nearest_valid_border_pixel(Pos2 {
+                //     // x: *x_value * 0.325, // FIXME: don't hardcode this
+                //     // y: 1.0 - *y_value,
+                //     // x: *x_value,
+                //     // y: 1.0 - *y_value,
+                //     x: x + size.x,
+                //     y: y + size.y,
+                // });
                 dbg!(&fallback_color_pos);
                 picker_info.prev_fallback_color_pos = fallback_color_pos;
-                fallback_color_pos // Return xy, not polar
+                fallback_color_pos
             } else {
                 picker_info.prev_fallback_color_pos
             };
             // let color = picker_info.nearest_valid_color(angle, r, invert_radial_value, &color_at);
             if let Some(pos) = fallback_color_pos {
+                let pos_px = Pos2 {
+                    x: pos.x + size.x,
+                    y: pos.y + size.y,
+                };
                 draw_inward_triangles(
                     &painter,
                     pos + rect.min.to_vec2(),
@@ -532,7 +599,6 @@ fn color_slider_2d_grid_oklch(
                 );
             }
         }
-
         ui.data_mut(|d| {
             d.insert_temp(picker_id, picker_info.clone());
         });
@@ -542,7 +608,7 @@ fn color_slider_2d_grid_oklch(
         ui.ctx().set_cursor_icon(egui::CursorIcon::None);
     }
 
-    response
+    (response, viewport_contains_picked_color || color_is_valid)
 }
 
 pub fn draw_inward_triangles(
@@ -598,7 +664,7 @@ struct CachedPicker {
     viewport_bounds: [f32; 4],
     texture: egui::TextureHandle,
     polar_coordinates: Arc<[PolarCoordinate]>,
-    border_positions: Arc<[Pos2]>,
+    border_positions_px: Arc<[Pos2]>,
     prev_fallback_color_pos: Option<PolarCoordinate>,
 }
 
@@ -621,18 +687,18 @@ impl CachedPicker {
             invert_radial_value,
             color_at,
         );
+        let border_positions_px = CachedPicker::calculate_border_from_pixels(size, &pixels);
         let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
         let texture =
             ui.ctx()
                 .load_texture("oklch_radial_fixed", image, egui::TextureOptions::LINEAR);
-        let border_positions = CachedPicker::calculate_border_from_pixels(size, &pixels);
         CachedPicker {
             stable_value_bits: (stable_value * 10000.) as u32,
             size: size,
             viewport_bounds,
             texture: texture,
             polar_coordinates: Arc::from(polar_coordinates),
-            border_positions: Arc::from(border_positions),
+            border_positions_px: Arc::from(border_positions_px),
             prev_fallback_color_pos: None,
         }
     }
@@ -642,7 +708,7 @@ impl CachedPicker {
         self.polar_coordinates = Arc::from(coords);
     }
 
-    fn update_pixel_values_and_border_positions(
+    fn update_pixel_values_and_border_positions_px(
         &mut self,
         stable_value: f32,
         invert_radial_value: bool,
@@ -661,8 +727,8 @@ impl CachedPicker {
             color_at,
         );
 
-        let border_positions = CachedPicker::calculate_border_from_pixels(self.size, &pixels);
-        self.border_positions = Arc::from(border_positions);
+        let border_positions_px = CachedPicker::calculate_border_from_pixels(self.size, &pixels);
+        self.border_positions_px = Arc::from(border_positions_px);
 
         let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
         self.texture.set(image, egui::TextureOptions::LINEAR);
@@ -840,7 +906,7 @@ impl CachedPicker {
     fn calculate_border_from_pixels(size: Vec2, pixels: &Vec<u8>) -> Vec<Pos2> {
         let pixels_w = size.x as usize;
         let pixels_h = size.y as usize;
-        let mut border_positions = Vec::new();
+        let mut border_positions_px = Vec::new();
         for y in 1..pixels_h - 1 {
             for x in 1..pixels_w - 1 {
                 let i = (y * pixels_w + x) * 4;
@@ -874,14 +940,14 @@ impl CachedPicker {
                 }
 
                 if neighbor_invalid {
-                    border_positions.push(Pos2 {
+                    border_positions_px.push(Pos2 {
                         x: x as f32,
                         y: y as f32,
                     });
                 }
             }
         }
-        border_positions
+        border_positions_px
     }
 
     fn calculate_color_per_pixel(
@@ -939,8 +1005,8 @@ impl CachedPicker {
         let mut min_distance = f32::MAX;
         let mut min_distance_i = 0;
         let mut found_nothing = true;
-        let border_positions = self.border_positions.clone();
-        for (i, border_coord) in border_positions.iter().enumerate() {
+        let border_positions_px = self.border_positions_px.clone();
+        for (i, border_coord) in border_positions_px.iter().enumerate() {
             let distance =
                 ((start_x - border_coord.x).powi(2) + (start_y - border_coord.y).powi(2)).sqrt();
             if distance < min_distance {
@@ -952,7 +1018,7 @@ impl CachedPicker {
         if found_nothing {
             return None;
         } else {
-            return Some(border_positions[min_distance_i]);
+            return Some(border_positions_px[min_distance_i]);
         }
     }
 
@@ -1011,6 +1077,22 @@ impl CachedPicker {
     }
 }
 
+fn pixel_to_coordinates(pixel_pos: Pos2, size: Vec2, viewport_bounds: [f32; 4]) -> Pos2 {
+    let x = viewport_bounds[0]
+        + (pixel_pos.x + 0.5) / size.x * (viewport_bounds[2] - viewport_bounds[0]);
+    let y = viewport_bounds[1]
+        + (pixel_pos.y + 0.5) / size.y * (viewport_bounds[3] - viewport_bounds[1]);
+    Pos2 { x, y }
+}
+
+fn coordinates_to_pixel(coord: Pos2, size: Vec2, viewport_bounds: [f32; 4]) -> Pos2 {
+    let px_x =
+        size.x * (coord.x - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]) - 0.5;
+    let px_y =
+        size.y * (coord.y - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]) - 0.5;
+    Pos2 { x: px_x, y: px_y }
+}
+
 #[derive(Clone)]
 struct CachedPickerCartesian {
     stable_value_bits: u32,
@@ -1018,7 +1100,7 @@ struct CachedPickerCartesian {
     viewport_bounds: [f32; 4],
     texture: egui::TextureHandle,
     coordinates: Arc<[Pos2]>,
-    border_positions: Arc<[Pos2]>,
+    border_positions_px: Arc<[Pos2]>,
     prev_fallback_color_pos: Option<Pos2>,
 }
 
@@ -1032,6 +1114,7 @@ impl CachedPickerCartesian {
         let pixels_w = size.x as usize;
         let pixels_h = size.y as usize;
         let viewport_bounds = [0., 0., 1., 1.];
+        // let viewport_bounds = [-2., -2., 2., 2.];
         // let viewport_bounds = [-1., 0., 1., 1.]; // TODO: ALso create a mode for this, quite nice :)
         let coordinates = CachedPickerCartesian::calculate_coordinates(size, viewport_bounds);
         let pixels = CachedPickerCartesian::calculate_color_per_pixel(
@@ -1044,16 +1127,43 @@ impl CachedPickerCartesian {
         let texture =
             ui.ctx()
                 .load_texture("oklch_radial_fixed", image, egui::TextureOptions::LINEAR);
-        let border_positions = CachedPicker::calculate_border_from_pixels(size, &pixels);
+        let border_positions_px =
+            CachedPickerCartesian::calculate_border_from_pixels(size, &pixels);
         CachedPickerCartesian {
             stable_value_bits: (stable_value * 10000.) as u32,
             size: size,
             viewport_bounds,
             texture: texture,
             coordinates: Arc::from(coordinates),
-            border_positions: Arc::from(border_positions),
+            border_positions_px: Arc::from(border_positions_px),
             prev_fallback_color_pos: None,
         }
+    }
+
+    fn calculate_coordinates(size: Vec2, viewport_bounds: [f32; 4]) -> Vec<Pos2> {
+        let pixels_w = size.x as usize;
+        let pixels_h = size.y as usize;
+        let mut coordinates: Vec<Pos2> = Vec::with_capacity(pixels_w * pixels_h);
+
+        for i_y in 0..pixels_h {
+            for i_x in 0..pixels_w {
+                // let nx = (i_x as f32 + 0.5) / pixels_w as f32;
+                // let ny = (i_y as f32 + 0.5) / pixels_h as f32;
+                // let x = viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
+                // let y = 1.0 - (viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]));
+                let coords = pixel_to_coordinates(
+                    Pos2 {
+                        x: i_x as f32,
+                        y: (pixels_h - i_y) as f32,
+                        // y: i_y as f32,
+                    },
+                    size,
+                    viewport_bounds,
+                );
+                coordinates.push(coords);
+            }
+        }
+        coordinates
     }
 
     fn update_coordinates(&mut self, size: Vec2) {
@@ -1061,7 +1171,7 @@ impl CachedPickerCartesian {
         self.coordinates = Arc::from(coords);
     }
 
-    fn update_pixel_values_and_border_positions(
+    fn update_pixel_values_and_border_positions_px(
         &mut self,
         stable_value: f32,
         color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
@@ -1071,15 +1181,16 @@ impl CachedPickerCartesian {
         let pixels_w = self.size.x as usize;
         let pixels_h = self.size.y as usize;
         let coordinates = self.coordinates.clone();
-        let mut pixels = CachedPickerCartesian::calculate_color_per_pixel(
+        let pixels = CachedPickerCartesian::calculate_color_per_pixel(
             &coordinates,
             &self.size,
             stable_value,
             color_at,
         );
 
-        let border_positions = CachedPicker::calculate_border_from_pixels(self.size, &pixels);
-        self.border_positions = Arc::from(border_positions);
+        let border_positions_px =
+            CachedPickerCartesian::calculate_border_from_pixels(self.size, &pixels);
+        self.border_positions_px = Arc::from(border_positions_px);
 
         let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
         self.texture.set(image, egui::TextureOptions::LINEAR);
@@ -1109,11 +1220,11 @@ impl CachedPickerCartesian {
             let dx_world = drag.x / ui_rect.width() * width;
             let dy_world = drag.y / ui_rect.height() * height;
 
+            // Note: y-axis is negative
             viewport_bounds[0] -= dx_world;
+            viewport_bounds[1] += dy_world;
             viewport_bounds[2] -= dx_world;
-
-            viewport_bounds[1] -= dy_world;
-            viewport_bounds[3] -= dy_world;
+            viewport_bounds[3] += dy_world;
         }
 
         //
@@ -1140,7 +1251,7 @@ impl CachedPickerCartesian {
                     let height = viewport_bounds[3] - viewport_bounds[1];
 
                     const MAX_ZOOM_FACTOR: f32 = 7.0;
-                    const WORLD_SIZE: f32 = 2.0; // [-1, 1]
+                    const WORLD_SIZE: f32 = 4.0; // [0, 1]
 
                     let min_width = WORLD_SIZE / MAX_ZOOM_FACTOR;
                     let min_height = WORLD_SIZE / MAX_ZOOM_FACTOR;
@@ -1172,13 +1283,13 @@ impl CachedPickerCartesian {
             }
         }
         if viewport_changed {
-            CachedPicker::clamp_viewport(viewport_bounds)
+            CachedPickerCartesian::clamp_viewport(viewport_bounds)
         }
         viewport_changed
     }
 
     fn clamp_viewport(viewport: &mut [f32; 4]) {
-        let min_world = -1.0;
+        let min_world = 0.0;
         let max_world = 1.0;
 
         let mut min_x = viewport[0];
@@ -1232,35 +1343,17 @@ impl CachedPickerCartesian {
             min_y += dy_top;
             max_y += dy_top;
         }
-
         viewport[0] = min_x;
         viewport[1] = min_y;
         viewport[2] = max_x;
         viewport[3] = max_y;
     }
 
-    fn calculate_coordinates(size: Vec2, viewport_bounds: [f32; 4]) -> Vec<Pos2> {
-        let pixels_w = size.x as usize;
-        let pixels_h = size.y as usize;
-        let mut coords: Vec<Pos2> = Vec::with_capacity(pixels_w * pixels_h);
-
-        for i_y in 0..pixels_h {
-            for i_x in 0..pixels_w {
-                let nx = (i_x as f32 + 0.5) / pixels_w as f32;
-                let ny = (i_y as f32 + 0.5) / pixels_h as f32;
-                let x = viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
-                let y = viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
-                coords.push(Pos2 { x, y });
-            }
-        }
-        coords
-    }
-
     fn calculate_border_from_pixels(size: Vec2, pixels: &Vec<u8>) -> Vec<Pos2> {
         // Note: same as polar version, consider unifying
         let pixels_w = size.x as usize;
         let pixels_h = size.y as usize;
-        let mut border_positions = Vec::new();
+        let mut border_positions_px = Vec::new();
         for y in 1..pixels_h - 1 {
             for x in 1..pixels_w - 1 {
                 let i = (y * pixels_w + x) * 4;
@@ -1272,8 +1365,9 @@ impl CachedPickerCartesian {
 
                 let mut neighbor_invalid = false;
 
-                for dy in -1i32..=1 {
-                    for dx in -1i32..=1 {
+                let mut ni: usize = 0;
+                for dy in -1..=1 {
+                    for dx in -1..=1 {
                         if dx == 0 && dy == 0 {
                             continue;
                         }
@@ -1281,7 +1375,7 @@ impl CachedPickerCartesian {
                         let nx = (x as i32 + dx) as usize;
                         let ny = (y as i32 + dy) as usize;
 
-                        let ni = (ny * pixels_w + nx) * 4;
+                        ni = (ny * pixels_w + nx) * 4;
 
                         if pixels[ni + 3] == 0 {
                             neighbor_invalid = true;
@@ -1294,14 +1388,18 @@ impl CachedPickerCartesian {
                 }
 
                 if neighbor_invalid {
-                    border_positions.push(Pos2 {
+                    // pixels[ni + 0] = 200;
+                    // pixels[ni + 1] = 0;
+                    // pixels[ni + 2] = 0;
+                    // pixels[ni + 3] = 255;
+                    border_positions_px.push(Pos2 {
                         x: x as f32,
                         y: y as f32,
                     });
                 }
             }
         }
-        border_positions
+        border_positions_px
     }
 
     fn calculate_color_per_pixel(
@@ -1314,34 +1412,36 @@ impl CachedPickerCartesian {
         let pixels_h = size.y as usize;
 
         let mut pixels = vec![0 as u8; pixels_w * pixels_h * 4];
-
         for i_y in 0..pixels_h {
             for i_x in 0..pixels_w {
-                let i = i_y * pixels_w + i_x;
-                let coord = coordinates[i];
+                let coord_i = i_y * pixels_w + i_x;
+
+                let coord = coordinates[coord_i];
 
                 let (is_valid, color) = color_at(coord.x, coord.y, stable_value);
 
                 if is_valid {
-                    let i = (i_y * pixels_w + i_x) * 4;
-                    pixels[i] = color.r();
-                    pixels[i + 1] = color.g();
-                    pixels[i + 2] = color.b();
-                    pixels[i + 3] = color.a();
+                    let px_i = (i_y * pixels_w + i_x) * 4;
+                    pixels[px_i] = color.r();
+                    pixels[px_i + 1] = color.g();
+                    pixels[px_i + 2] = color.b();
+                    pixels[px_i + 3] = color.a();
                 }
             }
         }
+        // dbg!([minx, miny, maxx, maxy]);
         pixels
     }
 
-    fn nearest_valid_border_coord(&self, coord: Pos2) -> Option<Pos2> {
+    fn nearest_valid_border_pixel(&self, coord_px: Pos2) -> Option<Pos2> {
         let mut min_distance = f32::MAX;
         let mut min_distance_i = 0;
         let mut found_nothing = true;
-        let border_positions = self.border_positions.clone();
-        for (i, border_coord) in border_positions.iter().enumerate() {
+        let border_positions_px = self.border_positions_px.clone();
+        let viewport_bounds = self.viewport_bounds;
+        for (i, border_px) in border_positions_px.iter().enumerate() {
             let distance =
-                ((coord.x - border_coord.x).powi(2) + (coord.y - border_coord.y).powi(2)).sqrt();
+                ((coord_px.x - border_px.x).powi(2) + (coord_px.y - border_px.y).powi(2)).sqrt();
             if distance < min_distance {
                 min_distance_i = i;
                 min_distance = distance;
@@ -1351,14 +1451,16 @@ impl CachedPickerCartesian {
         if found_nothing {
             return None;
         } else {
-            return Some(border_positions[min_distance_i]);
+            let lab = border_positions_px[min_distance_i];
+            let bla = pixel_to_coordinates(lab, self.size, viewport_bounds);
+            println!("Coord {:?} nearby: {:?}", coord_px, bla);
+            return Some(border_positions_px[min_distance_i]);
         }
     }
 
     fn nearest_valid_color(
         &self,
         coord: Pos2,
-        invert_radial_value: bool,
         color_at: impl Fn(f32, f32, f32) -> (bool, Color32), // TODO: move to self as function pointer
     ) -> Color32 {
         // Here we could sample the pixels vec, but we can also determine the color
@@ -1374,12 +1476,22 @@ impl CachedPickerCartesian {
         }
 
         // If color does not exist, return nearest color
-        let sample_pos = self.nearest_valid_border_coord(coord);
+        println!("Fallback color coord: {:?}", &coord);
+        let coord_px = coordinates_to_pixel(
+            Pos2 {
+                x: coord.x,
+                y: 1.0 - coord.y,
+            },
+            self.size,
+            self.viewport_bounds,
+        );
+        let sample_pixel = self.nearest_valid_border_pixel(coord_px);
         let fallback_color = Color32::BLACK; // Take a look at the values where no possibilities left, what is the last color to disappear? Use that!
-        let color = match sample_pos {
+        let color = match sample_pixel {
             None => fallback_color,
-            Some(sample_pos) => {
-                let (_, color) = color_at(sample_pos.x, sample_pos.y, stable_value);
+            Some(sample_px) => {
+                let sample_pos = pixel_to_coordinates(sample_px, self.size, self.viewport_bounds);
+                let (_, color) = color_at(sample_pos.x, 1.0 - sample_pos.y, stable_value);
                 color
             }
         };
@@ -1626,7 +1738,7 @@ fn color_slider_2d_radial(
             picker_info.update_polar_coordinates(size);
         }
         if size_changed || stable_value_changed {
-            picker_info.update_pixel_values_and_border_positions(
+            picker_info.update_pixel_values_and_border_positions_px(
                 stable_value,
                 invert_radial_value,
                 &color_at,
@@ -1638,7 +1750,7 @@ fn color_slider_2d_radial(
             CachedPicker::update_viewport_bounds(&response, rect, &mut picker_info.viewport_bounds);
         if viewport_changed {
             picker_info.update_polar_coordinates(size);
-            picker_info.update_pixel_values_and_border_positions(
+            picker_info.update_pixel_values_and_border_positions_px(
                 stable_value,
                 invert_radial_value,
                 &color_at,
@@ -1887,21 +1999,45 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
     let new_color = match tab {
         OKLabPlotType::StableHue => {
             let ui_identifyable_label = "StableHueColorPicker";
-            color_slider_2d_grid_oklch(
+            let (_response, update_color_) = color_slider_2d_grid_oklch(
                 ui,
                 &mut state.c,
                 &mut state.l,
                 state.h * std::f32::consts::TAU,
-                |x, y, h| {
+                |x, y, stable_value| {
                     oklch_to_color32(Oklch {
-                        l: 1.0 - y,
+                        l: y,
+                        // l: 1.0 - y,
                         c: x * 0.325,
-                        h,
+                        h: stable_value,
                     })
                 },
                 ui_identifyable_label,
             );
-            Color32::CYAN
+            update_color = update_color_;
+            let picker_id = ui.id().with(ui_identifyable_label);
+            // let picker_info = ui.data(|d| d.get_temp::<CachedPickerCartesian>(picker_id).unwrap()); // Has to have been set by color_slider_2d_radial.
+            let picker_info_opt = ui.data(|d| d.get_temp::<CachedPickerCartesian>(picker_id));
+            let picked_color = match picker_info_opt {
+                Some(picker_info) => picker_info.nearest_valid_color(
+                    Pos2 {
+                        // x: state.c * 0.325,
+                        x: state.c,
+                        y: state.l,
+                    },
+                    |x, y, stable| {
+                        oklch_to_color32(Oklch {
+                            l: y,
+                            // l: 1.0 - y,
+                            c: x * 0.325,
+                            // c: x,
+                            h: stable,
+                        })
+                    },
+                ),
+                None => Color32::CYAN,
+            };
+            picked_color
         }
         OKLabPlotType::StableChroma => {
             let ui_identifyable_label = "StableChromeColorPicker";
