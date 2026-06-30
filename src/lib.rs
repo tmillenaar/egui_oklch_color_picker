@@ -1,11 +1,19 @@
 //! Color picker widgets.
 
 // use egui::util::fixed_cache::FixedCache;
+mod color_projection;
 mod conversions;
+mod coordinate_transforms;
+mod picker_2d;
+
+use crate::color_projection::*;
+use crate::conversions::*;
+use crate::coordinate_transforms::*;
+use crate::picker_2d::*;
+
 use std::f32;
 use std::sync::Arc;
 
-use crate::conversions::*;
 use egui::Order::Background;
 use egui::epaint::RectShape;
 use egui::{
@@ -134,7 +142,7 @@ fn color_slider_1d_grid(
     slider_value: &mut f32,
     slider_value_nearest_color: f32,
     nearest_color: Color32,
-    color_at: impl Fn(f32) -> (bool, Color32),
+    color_at: impl Fn(f32) -> ColorSample,
     background_color_at: Option<impl Fn(f32) -> Color32>,
     axis_name: &str,
 ) -> Response {
@@ -175,12 +183,12 @@ fn color_slider_1d_grid(
                         0.0
                     };
 
-                    let (is_valid, color) = color_at(t);
-                    if is_valid {
-                        pixels.push(color.r());
-                        pixels.push(color.g());
-                        pixels.push(color.b());
-                        pixels.push(color.a());
+                    let color_sample = color_at(t);
+                    if color_sample.valid {
+                        pixels.push(color_sample.color.r());
+                        pixels.push(color_sample.color.g());
+                        pixels.push(color_sample.color.b());
+                        pixels.push(color_sample.color.a());
                     } else {
                         match background_color_at {
                             None => {
@@ -238,8 +246,8 @@ fn color_slider_1d_grid(
 
         // If marker is not at valid color, show where the projected color would be on the slider
         let x = lerp(rect.left()..=rect.right(), slider_value_nearest_color);
-        let (is_valid, _) = color_at(*slider_value);
-        if !is_valid {
+        let color_sample = color_at(*slider_value);
+        if !color_sample.valid {
             // let (_, nearest_color) = color_at(slider_value_nearest_color);
             ui.painter().add(Shape::Rect(RectShape::new(
                 Rect::from_center_size(
@@ -407,209 +415,280 @@ pub enum Alpha {
     BlendOrAdditive,
 }
 
-fn color_slider_2d_grid_oklch(
+pub fn color_slider_2d<T, P>(
     ui: &mut Ui,
-    x_value: &mut f32,
-    y_value: &mut f32,
-    stable_value: f32,
-    color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
-    ui_identifyable_label: &str,
-) -> (Response, bool) {
+    coord: &mut T::Coord,
+    projection: P,
+    ui_identifiable_label: &str,
+) -> Response
+where
+    T: CoordinateTransform + Send + Sync + 'static,
+    T::Coord: Clone + Copy + PartialEq,
+    P: ColorProjection<T::Coord> + Clone + PartialEq + Send + Sync + 'static,
+{
     let desired_size = Vec2::splat(ui.spacing().slider_width);
+
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 
-    let size = response.rect.size();
-    let ui_center = rect.center();
+    let picker_id = ui.id().with(ui_identifiable_label);
 
-    // Get picker info
-    let picker_id = ui.id().with(ui_identifyable_label);
-    let mut picker_cache = ui.data(|d| d.get_temp::<CachedPickerCartesian>(picker_id));
+    let mut picker = ui
+        .data(|d| d.get_temp::<CachedPicker<T, P>>(picker_id))
+        .unwrap_or_else(|| CachedPicker::new(ui, rect.size(), projection.clone()));
 
-    let mut picker_info = match picker_cache {
-        None => CachedPickerCartesian::new(ui, size, stable_value, &color_at),
-        Some(picker_info) => picker_info,
-    };
+    // Resize if necessary.
+    picker.resize(rect.size());
 
-    let viewport_bounds = picker_info.viewport_bounds;
+    // Update projection if it changed.
+    picker.set_projection(projection);
 
-    // Mouse pointer interaction
-    let is_lmb_down = response
-        .ctx
-        .input(|i| i.pointer.button_down(PointerButton::Primary));
-    if is_lmb_down {
-        if let Some(mpos) = response.interact_pointer_pos() {
-            // *x_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
-            // *y_value = 1.0 - remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
-
-            let x_normalized = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
-            let y_normalized = remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
-            // dbg!((x_normalized, y_normalized));
-            // let mouse_coord = pixel_to_coordinates(Pos2 { x, y }, size, viewport_bounds);
-            // *x_value = mouse_coord.x;
-            // *y_value = mouse_coord.y;
-
-            // // 1. normalize mouse in UI space [0,1]
-            // let nx = (mpos.x - response.rect.left());
-            // let ny = (mpos.y - response.rect.top());
-
-            // 2. convert to WORLD space using viewport
-            // let viewport_bounds = picker_info.viewport_bounds;
-            let x = viewport_bounds[0] + x_normalized * (viewport_bounds[2] - viewport_bounds[0]);
-            let y = viewport_bounds[1] + y_normalized * (viewport_bounds[3] - viewport_bounds[1]);
-            // let mouse_coord = pixel_to_coordinates(
-            //     Pos2 {
-            //         x: x_normalized,
-            //         y: y_normalized,
-            //     },
-            //     size,
-            //     viewport_bounds,
-            // );
-            *x_value = x;
-            *y_value = y;
-        }
+    // Update viewport (zoom/pan).
+    if CachedPicker::<T, P>::update_viewport_bounds(&response, rect, &mut picker.viewport) {
+        picker.update_coordinates();
+        picker.update_texture();
     }
 
-    let mut viewport_contains_picked_color = false; // default in case rect not visible
-    let mut color_is_valid = false; // default in case rect not visible
-
     if ui.is_rect_visible(rect) {
-        let size = rect.size();
-        let painter = ui.painter().with_clip_rect(response.rect);
+        let painter = ui.painter().with_clip_rect(rect);
 
-        let stable_value_bits = (stable_value * 10000.) as u32;
-        let stable_value_changed = picker_info.stable_value_bits != stable_value_bits;
-        let size_changed = picker_info.size != size;
-        if size_changed {
-            picker_info.update_coordinates(size);
-        }
-        if size_changed || stable_value_changed {
-            picker_info.update_pixel_values_and_border_positions_px(stable_value, &color_at);
-        }
-
-        // Maybe unify with conditions above
-        let viewport_changed = CachedPickerCartesian::update_viewport_bounds(
-            &response,
-            rect,
-            &mut picker_info.viewport_bounds,
-        );
-        if viewport_changed {
-            picker_info.update_coordinates(size);
-            picker_info.update_pixel_values_and_border_positions_px(stable_value, &color_at);
-        }
-
-        let tex = picker_info.texture.clone();
         painter.image(
-            tex.id(),
+            picker.texture.id(),
             rect,
             Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
             Color32::WHITE,
         );
 
         let visuals = ui.style().interact(&response);
+
         painter.rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
+    }
 
-        // let nx = (i_x as f32 + 0.5) / pixels_w as f32;
-        // let ny = (i_y as f32 + 0.5) / pixels_h as f32;
-        // let x = viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
-        // let y = viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
-        // let x = *x_value * (viewport_bounds[2] - viewport_bounds[0]) + viewport_bounds[0];
-        // let y = *y_value * (viewport_bounds[3] - viewport_bounds[1]) + viewport_bounds[1];
-        // let x = viewport_bounds[0] + *x_value / (viewport_bounds[2] - viewport_bounds[0]);
-        // let y = viewport_bounds[1] + *y_value / (viewport_bounds[3] - viewport_bounds[1]);
-        let x = (*x_value - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]);
-        // let y = 1.0 - ((*y_value - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]));
-        let y = 1.0 - ((*y_value - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]));
-        // let marker_pos = Pos2::new(*x_value * size.x, *y_value * size.y);
-        let marker_pos = Pos2::new(x * size.x, y * size.y);
-
-        let (is_valid, color) = color_at(*x_value, *y_value, stable_value);
-        color_is_valid = is_valid;
-        dbg!(&color_is_valid);
-
-        let (indicator_color, marker_angle) = if is_valid {
-            (Color32::WHITE, 45.)
-        } else {
-            (Color32::WHITE, 0.)
-        };
-
-        let viewport_bounds = picker_info.viewport_bounds;
-        let nx = (x - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]);
-        let ny = (y - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]);
-        let x_ = response.rect.left() + nx * response.rect.width();
-        let y_ = response.rect.top() + ny * response.rect.height();
-
-        let marker_pos_ = Pos2::new(x_, y_);
-        viewport_contains_picked_color = response.rect.contains(marker_pos_);
-
-        draw_inward_triangles(
-            &painter,
-            marker_pos + rect.min.to_vec2(),
-            4.0,
-            4.0,
-            4,
-            marker_angle,
-            indicator_color,
-            Stroke {
-                width: 0.5,
-                color: Color32::BLACK,
-            },
-        );
-        // if false {
-        if is_valid {
-            picker_info.prev_fallback_color_pos = Some(Pos2 { x, y });
-        } else {
-            let fallback_color_pos = if viewport_contains_picked_color {
-                // let fallback_color_pos = picker_info.nearest_valid_border_coord(marker_pos);
-                dbg!((x, y));
-                let coord_px = coordinates_to_pixel(Pos2 { x, y }, size, viewport_bounds);
-
-                let fallback_color_pos = picker_info.nearest_valid_border_pixel(coord_px);
-                // let fallback_color_pos = picker_info.nearest_valid_border_pixel(Pos2 {
-                //     // x: *x_value * 0.325, // FIXME: don't hardcode this
-                //     // y: 1.0 - *y_value,
-                //     // x: *x_value,
-                //     // y: 1.0 - *y_value,
-                //     x: x + size.x,
-                //     y: y + size.y,
-                // });
-                dbg!(&fallback_color_pos);
-                picker_info.prev_fallback_color_pos = fallback_color_pos;
-                fallback_color_pos
-            } else {
-                picker_info.prev_fallback_color_pos
+    // Mouse interaction.
+    if response
+        .ctx
+        .input(|i| i.pointer.button_down(PointerButton::Primary))
+    {
+        if let Some(mouse) = response.interact_pointer_pos() {
+            let local = Pos2 {
+                x: mouse.x - rect.left(),
+                y: mouse.y - rect.top(),
             };
-            // let color = picker_info.nearest_valid_color(angle, r, invert_radial_value, &color_at);
-            if let Some(pos) = fallback_color_pos {
-                let pos_px = Pos2 {
-                    x: pos.x + size.x,
-                    y: pos.y + size.y,
-                };
-                draw_inward_triangles(
-                    &painter,
-                    pos + rect.min.to_vec2(),
-                    3.0,  // radius
-                    3.0,  // size
-                    4,    // count
-                    45.0, // radial-offset
-                    Color32::WHITE,
-                    Stroke {
-                        width: 0.5,
-                        color: Color32::BLACK,
-                    },
-                );
-            }
+
+            *coord = picker.pixel_to_coord(local);
         }
-        ui.data_mut(|d| {
-            d.insert_temp(picker_id, picker_info.clone());
-        });
     }
 
-    if response.is_pointer_button_down_on() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::None);
-    }
+    ui.data_mut(|d| {
+        d.insert_temp(picker_id, picker);
+    });
 
-    (response, viewport_contains_picked_color || color_is_valid)
+    response
 }
+
+// fn color_slider_2d_grid_oklch(
+//     ui: &mut Ui,
+//     x_value: &mut f32,
+//     y_value: &mut f32,
+//     stable_value: f32,
+//     color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
+//     ui_identifyable_label: &str,
+// ) -> (Response, bool) {
+//     let desired_size = Vec2::splat(ui.spacing().slider_width);
+//     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
+
+//     let size = response.rect.size();
+//     let ui_center = rect.center();
+
+//     // Get picker info
+//     let picker_id = ui.id().with(ui_identifyable_label);
+//     let mut picker_cache = ui.data(|d| d.get_temp::<CachedPickerCartesian>(picker_id));
+
+//     let mut picker_info = match picker_cache {
+//         None => CachedPickerCartesian::new(ui, size, stable_value, &color_at),
+//         Some(picker_info) => picker_info,
+//     };
+
+//     let viewport_bounds = picker_info.viewport_bounds;
+
+//     // Mouse pointer interaction
+//     let is_lmb_down = response
+//         .ctx
+//         .input(|i| i.pointer.button_down(PointerButton::Primary));
+//     if is_lmb_down {
+//         if let Some(mpos) = response.interact_pointer_pos() {
+//             // *x_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
+//             // *y_value = 1.0 - remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
+
+//             let x_normalized = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
+//             let y_normalized = remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
+//             // dbg!((x_normalized, y_normalized));
+//             // let mouse_coord = pixel_to_coordinates(Pos2 { x, y }, size, viewport_bounds);
+//             // *x_value = mouse_coord.x;
+//             // *y_value = mouse_coord.y;
+
+//             // // 1. normalize mouse in UI space [0,1]
+//             // let nx = (mpos.x - response.rect.left());
+//             // let ny = (mpos.y - response.rect.top());
+
+//             // 2. convert to WORLD space using viewport
+//             // let viewport_bounds = picker_info.viewport_bounds;
+//             let x = viewport_bounds[0] + x_normalized * (viewport_bounds[2] - viewport_bounds[0]);
+//             let y = viewport_bounds[1] + y_normalized * (viewport_bounds[3] - viewport_bounds[1]);
+//             // let mouse_coord = pixel_to_coordinates(
+//             //     Pos2 {
+//             //         x: x_normalized,
+//             //         y: y_normalized,
+//             //     },
+//             //     size,
+//             //     viewport_bounds,
+//             // );
+//             *x_value = x;
+//             *y_value = y;
+//         }
+//     }
+
+//     let mut viewport_contains_picked_color = false; // default in case rect not visible
+//     let mut color_is_valid = false; // default in case rect not visible
+
+//     if ui.is_rect_visible(rect) {
+//         let size = rect.size();
+//         let painter = ui.painter().with_clip_rect(response.rect);
+
+//         let stable_value_bits = (stable_value * 10000.) as u32;
+//         let stable_value_changed = picker_info.stable_value_bits != stable_value_bits;
+//         let size_changed = picker_info.size != size;
+//         if size_changed {
+//             picker_info.update_coordinates(size);
+//         }
+//         if size_changed || stable_value_changed {
+//             picker_info.update_pixel_values_and_border_positions_px(stable_value, &color_at);
+//         }
+
+//         // Maybe unify with conditions above
+//         let viewport_changed = CachedPickerCartesian::update_viewport_bounds(
+//             &response,
+//             rect,
+//             &mut picker_info.viewport_bounds,
+//         );
+//         if viewport_changed {
+//             picker_info.update_coordinates(size);
+//             picker_info.update_pixel_values_and_border_positions_px(stable_value, &color_at);
+//         }
+
+//         let tex = picker_info.texture.clone();
+//         painter.image(
+//             tex.id(),
+//             rect,
+//             Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+//             Color32::WHITE,
+//         );
+
+//         let visuals = ui.style().interact(&response);
+//         painter.rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
+
+//         // let nx = (i_x as f32 + 0.5) / pixels_w as f32;
+//         // let ny = (i_y as f32 + 0.5) / pixels_h as f32;
+//         // let x = viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
+//         // let y = viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
+//         // let x = *x_value * (viewport_bounds[2] - viewport_bounds[0]) + viewport_bounds[0];
+//         // let y = *y_value * (viewport_bounds[3] - viewport_bounds[1]) + viewport_bounds[1];
+//         // let x = viewport_bounds[0] + *x_value / (viewport_bounds[2] - viewport_bounds[0]);
+//         // let y = viewport_bounds[1] + *y_value / (viewport_bounds[3] - viewport_bounds[1]);
+//         let x = (*x_value - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]);
+//         // let y = 1.0 - ((*y_value - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]));
+//         let y =
+//             (((1.0 - *y_value) - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]));
+//         // let marker_pos = Pos2::new(*x_value * size.x, *y_value * size.y);
+//         let marker_pos = Pos2::new(x * size.x, y * size.y);
+
+//         let (is_valid, color) = color_at(*x_value, *y_value, stable_value);
+//         color_is_valid = is_valid;
+//         dbg!(&color_is_valid);
+
+//         let (indicator_color, marker_angle) = if is_valid {
+//             (Color32::WHITE, 45.)
+//         } else {
+//             (Color32::WHITE, 0.)
+//         };
+
+//         let viewport_bounds = picker_info.viewport_bounds;
+//         let nx = (x - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]);
+//         let ny = (y - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]);
+//         let x_ = response.rect.left() + nx * response.rect.width();
+//         let y_ = response.rect.top() + ny * response.rect.height();
+
+//         let marker_pos_ = Pos2::new(x_, y_);
+//         viewport_contains_picked_color = response.rect.contains(marker_pos_);
+
+//         draw_inward_triangles(
+//             &painter,
+//             marker_pos + rect.min.to_vec2(),
+//             4.0,
+//             4.0,
+//             4,
+//             marker_angle,
+//             indicator_color,
+//             Stroke {
+//                 width: 0.5,
+//                 color: Color32::BLACK,
+//             },
+//         );
+//         // if false {
+//         if is_valid {
+//             picker_info.prev_fallback_color_pos = Some(Pos2 { x, y });
+//         } else {
+//             let fallback_color_pos = if viewport_contains_picked_color {
+//                 // let fallback_color_pos = picker_info.nearest_valid_border_coord(marker_pos);
+//                 dbg!((x, y));
+//                 let coord_px = coordinates_to_pixel(Pos2 { x, y }, size, viewport_bounds);
+
+//                 let fallback_color_pos = picker_info.nearest_valid_border_pixel(coord_px);
+//                 // let fallback_color_pos = picker_info.nearest_valid_border_pixel(Pos2 {
+//                 //     // x: *x_value * 0.325, // FIXME: don't hardcode this
+//                 //     // y: 1.0 - *y_value,
+//                 //     // x: *x_value,
+//                 //     // y: 1.0 - *y_value,
+//                 //     x: x + size.x,
+//                 //     y: y + size.y,
+//                 // });
+//                 dbg!(&fallback_color_pos);
+//                 picker_info.prev_fallback_color_pos = fallback_color_pos;
+//                 fallback_color_pos
+//             } else {
+//                 picker_info.prev_fallback_color_pos
+//             };
+//             // let color = picker_info.nearest_valid_color(angle, r, invert_radial_value, &color_at);
+//             if let Some(pos) = fallback_color_pos {
+//                 let pos_px = Pos2 {
+//                     x: pos.x + size.x,
+//                     y: pos.y + size.y,
+//                 };
+//                 draw_inward_triangles(
+//                     &painter,
+//                     pos + rect.min.to_vec2(),
+//                     3.0,  // radius
+//                     3.0,  // size
+//                     4,    // count
+//                     45.0, // radial-offset
+//                     Color32::WHITE,
+//                     Stroke {
+//                         width: 0.5,
+//                         color: Color32::BLACK,
+//                     },
+//                 );
+//             }
+//         }
+//         ui.data_mut(|d| {
+//             d.insert_temp(picker_id, picker_info.clone());
+//         });
+//     }
+
+//     if response.is_pointer_button_down_on() {
+//         ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+//     }
+
+//     (response, viewport_contains_picked_color || color_is_valid)
+// }
 
 pub fn draw_inward_triangles(
     painter: &Painter,
@@ -651,448 +730,6 @@ pub fn draw_inward_triangles(
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-struct PolarCoordinate {
-    radius: f32,
-    angle: f32,
-}
-
-#[derive(Clone)]
-struct CachedPicker {
-    stable_value_bits: u32,
-    size: Vec2,
-    viewport_bounds: [f32; 4],
-    texture: egui::TextureHandle,
-    polar_coordinates: Arc<[PolarCoordinate]>,
-    border_positions_px: Arc<[Pos2]>,
-    prev_fallback_color_pos: Option<PolarCoordinate>,
-}
-
-impl CachedPicker {
-    fn new(
-        ui: &mut egui::Ui,
-        size: Vec2,
-        stable_value: f32,
-        invert_radial_value: bool,
-        color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
-    ) -> CachedPicker {
-        let pixels_w = size.x as usize;
-        let pixels_h = size.y as usize;
-        let viewport_bounds = [-1., -1., 1., 1.];
-        let polar_coordinates = CachedPicker::calculate_polar_coordinates(size, viewport_bounds);
-        let pixels = CachedPicker::calculate_color_per_pixel(
-            &polar_coordinates,
-            &size,
-            stable_value,
-            invert_radial_value,
-            color_at,
-        );
-        let border_positions_px = CachedPicker::calculate_border_from_pixels(size, &pixels);
-        let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
-        let texture =
-            ui.ctx()
-                .load_texture("oklch_radial_fixed", image, egui::TextureOptions::LINEAR);
-        CachedPicker {
-            stable_value_bits: (stable_value * 10000.) as u32,
-            size: size,
-            viewport_bounds,
-            texture: texture,
-            polar_coordinates: Arc::from(polar_coordinates),
-            border_positions_px: Arc::from(border_positions_px),
-            prev_fallback_color_pos: None,
-        }
-    }
-
-    fn update_polar_coordinates(&mut self, size: Vec2) {
-        let coords = CachedPicker::calculate_polar_coordinates(size, self.viewport_bounds);
-        self.polar_coordinates = Arc::from(coords);
-    }
-
-    fn update_pixel_values_and_border_positions_px(
-        &mut self,
-        stable_value: f32,
-        invert_radial_value: bool,
-        color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
-    ) {
-        self.stable_value_bits = (stable_value * 10000.) as u32;
-
-        let pixels_w = self.size.x as usize;
-        let pixels_h = self.size.y as usize;
-        let polar_coordinates = self.polar_coordinates.clone();
-        let mut pixels = CachedPicker::calculate_color_per_pixel(
-            &polar_coordinates,
-            &self.size,
-            stable_value,
-            invert_radial_value,
-            color_at,
-        );
-
-        let border_positions_px = CachedPicker::calculate_border_from_pixels(self.size, &pixels);
-        self.border_positions_px = Arc::from(border_positions_px);
-
-        let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
-        self.texture.set(image, egui::TextureOptions::LINEAR);
-    }
-
-    fn update_viewport_bounds(
-        response: &egui::Response,
-        ui_rect: egui::Rect,
-        viewport_bounds: &mut [f32; 4],
-    ) -> bool {
-        let width = viewport_bounds[2] - viewport_bounds[0];
-        let height = viewport_bounds[3] - viewport_bounds[1];
-
-        let mut viewport_changed = false;
-        //
-        // Pan
-        //
-        let is_pan_button_down = response.ctx.input(|i| {
-            i.pointer.button_down(PointerButton::Secondary)
-                || i.pointer.button_down(PointerButton::Middle)
-        });
-        if is_pan_button_down && response.dragged() {
-            viewport_changed = true;
-
-            let drag = response.drag_delta();
-
-            let dx_world = drag.x / ui_rect.width() * width;
-            let dy_world = drag.y / ui_rect.height() * height;
-
-            viewport_bounds[0] -= dx_world;
-            viewport_bounds[2] -= dx_world;
-
-            viewport_bounds[1] -= dy_world;
-            viewport_bounds[3] -= dy_world;
-        }
-
-        //
-        // Zoom
-        //
-        let scroll = response.ctx.input(|i| i.raw_scroll_delta.y);
-
-        if scroll.abs() > 0.0 {
-            if let Some(mouse_pos) = response.hover_pos() {
-                let nx = (mouse_pos.x - ui_rect.left()) / ui_rect.width();
-                let ny = (mouse_pos.y - ui_rect.top()) / ui_rect.height();
-
-                let mouse_world_x =
-                    viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
-
-                let mouse_world_y =
-                    viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
-
-                {
-                    // Do not zoom if we are already zoomed in rather far
-                    let zoom_factor = if scroll > 0.0 { 0.9 } else { 1.1 };
-
-                    let width = viewport_bounds[2] - viewport_bounds[0];
-                    let height = viewport_bounds[3] - viewport_bounds[1];
-
-                    const MAX_ZOOM_FACTOR: f32 = 7.0;
-                    const WORLD_SIZE: f32 = 2.0; // [-1, 1]
-
-                    let min_width = WORLD_SIZE / MAX_ZOOM_FACTOR;
-                    let min_height = WORLD_SIZE / MAX_ZOOM_FACTOR;
-
-                    let new_width = width * zoom_factor;
-                    let new_height = height * zoom_factor;
-
-                    // Prevent further zoom-in once maximum zoom is reached.
-                    if scroll > 0.0 && (new_width < min_width || new_height < min_height) {
-                        // early return to guard against very deep zooms, viewport not changed
-                        return viewport_changed;
-                    }
-                }
-                viewport_changed = true;
-
-                let zoom_factor = if scroll > 0.0 { 0.9 } else { 1.1 };
-
-                viewport_bounds[0] =
-                    mouse_world_x + (viewport_bounds[0] - mouse_world_x) * zoom_factor;
-
-                viewport_bounds[2] =
-                    mouse_world_x + (viewport_bounds[2] - mouse_world_x) * zoom_factor;
-
-                viewport_bounds[1] =
-                    mouse_world_y + (viewport_bounds[1] - mouse_world_y) * zoom_factor;
-
-                viewport_bounds[3] =
-                    mouse_world_y + (viewport_bounds[3] - mouse_world_y) * zoom_factor;
-            }
-        }
-        if viewport_changed {
-            CachedPicker::clamp_viewport(viewport_bounds)
-        }
-        viewport_changed
-    }
-
-    fn clamp_viewport(viewport: &mut [f32; 4]) {
-        let min_world = -1.0;
-        let max_world = 1.0;
-
-        let mut min_x = viewport[0];
-        let mut min_y = viewport[1];
-        let mut max_x = viewport[2];
-        let mut max_y = viewport[3];
-
-        let width = max_x - min_x;
-        let height = max_y - min_y;
-
-        // -------------------------
-        // 1. Clamp zoom FIRST (uniform bounds)
-        // -------------------------
-        let max_width = max_world - min_world;
-        let max_height = max_world - min_world;
-
-        let width = width.min(max_width);
-        let height = height.min(max_height);
-
-        // compute center BEFORE correction
-        let cx = (min_x + max_x) * 0.5;
-        let cy = (min_y + max_y) * 0.5;
-
-        // rebuild viewport around center (this fixes drift)
-        min_x = cx - width * 0.5;
-        max_x = cx + width * 0.5;
-        min_y = cy - height * 0.5;
-        max_y = cy + height * 0.5;
-
-        // -------------------------
-        // 2. Clamp position (shift as a block)
-        // -------------------------
-        let dx_left = min_world - min_x;
-        let dx_right = max_world - max_x;
-
-        if dx_left > 0.0 {
-            min_x += dx_left;
-            max_x += dx_left;
-        } else if dx_right < 0.0 {
-            min_x += dx_right;
-            max_x += dx_right;
-        }
-
-        let dy_bottom = min_world - min_y;
-        let dy_top = max_world - max_y;
-
-        if dy_bottom > 0.0 {
-            min_y += dy_bottom;
-            max_y += dy_bottom;
-        } else if dy_top < 0.0 {
-            min_y += dy_top;
-            max_y += dy_top;
-        }
-
-        viewport[0] = min_x;
-        viewport[1] = min_y;
-        viewport[2] = max_x;
-        viewport[3] = max_y;
-    }
-
-    fn calculate_polar_coordinates(size: Vec2, viewport_bounds: [f32; 4]) -> Vec<PolarCoordinate> {
-        let pixels_w = size.x as usize;
-        let pixels_h = size.y as usize;
-        let mut coords: Vec<PolarCoordinate> = Vec::with_capacity(pixels_w * pixels_h);
-
-        for i_y in 0..pixels_h {
-            for i_x in 0..pixels_w {
-                let polar_coord =
-                    pixel_to_polar(i_x as f32, i_y as f32, pixels_w, pixels_h, viewport_bounds);
-                coords.push(polar_coord);
-            }
-        }
-        coords
-    }
-
-    fn calculate_border_from_pixels(size: Vec2, pixels: &Vec<u8>) -> Vec<Pos2> {
-        let pixels_w = size.x as usize;
-        let pixels_h = size.y as usize;
-        let mut border_positions_px = Vec::new();
-        for y in 1..pixels_h - 1 {
-            for x in 1..pixels_w - 1 {
-                let i = (y * pixels_w + x) * 4;
-
-                let valid = pixels[i + 3] != 0;
-                if !valid {
-                    continue;
-                }
-
-                let mut neighbor_invalid = false;
-
-                for dy in -1i32..=1 {
-                    for dx in -1i32..=1 {
-                        if dx == 0 && dy == 0 {
-                            continue;
-                        }
-
-                        let nx = (x as i32 + dx) as usize;
-                        let ny = (y as i32 + dy) as usize;
-
-                        let ni = (ny * pixels_w + nx) * 4;
-
-                        if pixels[ni + 3] == 0 {
-                            neighbor_invalid = true;
-                            break;
-                        }
-                    }
-                    if neighbor_invalid {
-                        break;
-                    }
-                }
-
-                if neighbor_invalid {
-                    border_positions_px.push(Pos2 {
-                        x: x as f32,
-                        y: y as f32,
-                    });
-                }
-            }
-        }
-        border_positions_px
-    }
-
-    fn calculate_color_per_pixel(
-        polar_coordinates: &[PolarCoordinate],
-        size: &Vec2,
-        stable_value: f32,
-        invert_radial_value: bool,
-        color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
-    ) -> Vec<u8> {
-        let pixels_w = size.x as usize;
-        let pixels_h = size.y as usize;
-
-        let mut pixels = vec![0 as u8; pixels_w * pixels_h * 4];
-
-        for i_y in 0..pixels_h {
-            for i_x in 0..pixels_w {
-                let i = i_y * pixels_w + i_x;
-                let polar_coord = polar_coordinates[i];
-
-                if polar_coord.radius > 1.0 {
-                    continue;
-                }
-
-                let radius = if invert_radial_value {
-                    (1.0 - polar_coord.radius).clamp(0.0, 1.0)
-                } else {
-                    polar_coord.radius.clamp(0.0, 1.0)
-                };
-                let (is_valid, color) = color_at(
-                    polar_coord.angle / std::f32::consts::TAU,
-                    radius,
-                    stable_value,
-                );
-
-                if is_valid {
-                    let i = (i_y * pixels_w + i_x) * 4;
-                    pixels[i] = color.r();
-                    pixels[i + 1] = color.g();
-                    pixels[i + 2] = color.b();
-                    pixels[i + 3] = color.a();
-                }
-            }
-        }
-        pixels
-    }
-
-    fn nearest_valid_border_coord(&self, radial_value: f32, angle_value: f32) -> Option<Pos2> {
-        let (start_x, start_y) = polar_to_pixel(
-            angle_value,
-            radial_value,
-            self.size.x as usize,
-            self.size.y as usize,
-            self.viewport_bounds,
-        );
-        let mut min_distance = f32::MAX;
-        let mut min_distance_i = 0;
-        let mut found_nothing = true;
-        let border_positions_px = self.border_positions_px.clone();
-        for (i, border_coord) in border_positions_px.iter().enumerate() {
-            let distance =
-                ((start_x - border_coord.x).powi(2) + (start_y - border_coord.y).powi(2)).sqrt();
-            if distance < min_distance {
-                min_distance_i = i;
-                min_distance = distance;
-                found_nothing = false;
-            }
-        }
-        if found_nothing {
-            return None;
-        } else {
-            return Some(border_positions_px[min_distance_i]);
-        }
-    }
-
-    fn nearest_valid_color(
-        &self,
-        angle: f32,
-        radius: f32,
-        invert_radial_value: bool,
-        color_at: impl Fn(f32, f32, f32) -> (bool, Color32), // TODO: move to self as function pointer
-    ) -> Color32 {
-        // Here we could sample the pixels vec, but we can also determine the color
-        // based on coordinates. This makes the function less pleasant to use, as we
-        // have to supply the color_at closure, but we would then not need to save
-        // a copy of the texture in RAM.
-        let stable_value = self.stable_value_bits as f32 / 10000.;
-
-        // If color exists at provided values, return the color
-        let r = if invert_radial_value {
-            (1.0 - radius).clamp(0.0, 1.0)
-        } else {
-            radius.clamp(0.0, 1.0)
-        };
-        let (is_valid, color) = color_at(angle / std::f32::consts::TAU, r, stable_value);
-        if is_valid {
-            return color;
-        }
-
-        // If color does not exist, return nearest color
-        let sample_pos = self.nearest_valid_border_coord(radius, angle);
-        let fallback_color = Color32::BLACK; // Take a look at the values where no possibilities left, what is the last color to disappear? Use that!
-        let color = match sample_pos {
-            None => fallback_color,
-            Some(sample_pos) => {
-                let polar_coord = pixel_to_polar(
-                    sample_pos.x,
-                    sample_pos.y,
-                    self.size.x as usize,
-                    self.size.y as usize,
-                    self.viewport_bounds,
-                );
-                let radius = if invert_radial_value {
-                    (1.0 - polar_coord.radius).clamp(0.0, 1.0)
-                } else {
-                    polar_coord.radius.clamp(0.0, 1.0)
-                };
-
-                let (_, color) = color_at(
-                    polar_coord.angle / std::f32::consts::TAU,
-                    radius,
-                    stable_value,
-                );
-                color
-            }
-        };
-        color
-    }
-}
-
-fn pixel_to_coordinates(pixel_pos: Pos2, size: Vec2, viewport_bounds: [f32; 4]) -> Pos2 {
-    let x = viewport_bounds[0]
-        + (pixel_pos.x + 0.5) / size.x * (viewport_bounds[2] - viewport_bounds[0]);
-    let y = viewport_bounds[1]
-        + (pixel_pos.y + 0.5) / size.y * (viewport_bounds[3] - viewport_bounds[1]);
-    Pos2 { x, y }
-}
-
-fn coordinates_to_pixel(coord: Pos2, size: Vec2, viewport_bounds: [f32; 4]) -> Pos2 {
-    let px_x =
-        size.x * (coord.x - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]) - 0.5;
-    let px_y =
-        size.y * (coord.y - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]) - 0.5;
-    Pos2 { x: px_x, y: px_y }
-}
-
 #[derive(Clone)]
 struct CachedPickerCartesian {
     stable_value_bits: u32,
@@ -1104,520 +741,404 @@ struct CachedPickerCartesian {
     prev_fallback_color_pos: Option<Pos2>,
 }
 
-impl CachedPickerCartesian {
-    fn new(
-        ui: &mut egui::Ui,
-        size: Vec2,
-        stable_value: f32,
-        color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
-    ) -> CachedPickerCartesian {
-        let pixels_w = size.x as usize;
-        let pixels_h = size.y as usize;
-        let viewport_bounds = [0., 0., 1., 1.];
-        // let viewport_bounds = [-2., -2., 2., 2.];
-        // let viewport_bounds = [-1., 0., 1., 1.]; // TODO: ALso create a mode for this, quite nice :)
-        let coordinates = CachedPickerCartesian::calculate_coordinates(size, viewport_bounds);
-        let pixels = CachedPickerCartesian::calculate_color_per_pixel(
-            &coordinates,
-            &size,
-            stable_value,
-            color_at,
-        );
-        let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
-        let texture =
-            ui.ctx()
-                .load_texture("oklch_radial_fixed", image, egui::TextureOptions::LINEAR);
-        let border_positions_px =
-            CachedPickerCartesian::calculate_border_from_pixels(size, &pixels);
-        CachedPickerCartesian {
-            stable_value_bits: (stable_value * 10000.) as u32,
-            size: size,
-            viewport_bounds,
-            texture: texture,
-            coordinates: Arc::from(coordinates),
-            border_positions_px: Arc::from(border_positions_px),
-            prev_fallback_color_pos: None,
-        }
-    }
-
-    fn calculate_coordinates(size: Vec2, viewport_bounds: [f32; 4]) -> Vec<Pos2> {
-        let pixels_w = size.x as usize;
-        let pixels_h = size.y as usize;
-        let mut coordinates: Vec<Pos2> = Vec::with_capacity(pixels_w * pixels_h);
-
-        for i_y in 0..pixels_h {
-            for i_x in 0..pixels_w {
-                // let nx = (i_x as f32 + 0.5) / pixels_w as f32;
-                // let ny = (i_y as f32 + 0.5) / pixels_h as f32;
-                // let x = viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
-                // let y = 1.0 - (viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]));
-                let coords = pixel_to_coordinates(
-                    Pos2 {
-                        x: i_x as f32,
-                        y: (pixels_h - i_y) as f32,
-                        // y: i_y as f32,
-                    },
-                    size,
-                    viewport_bounds,
-                );
-                coordinates.push(coords);
-            }
-        }
-        coordinates
-    }
-
-    fn update_coordinates(&mut self, size: Vec2) {
-        let coords = CachedPickerCartesian::calculate_coordinates(size, self.viewport_bounds);
-        self.coordinates = Arc::from(coords);
-    }
-
-    fn update_pixel_values_and_border_positions_px(
-        &mut self,
-        stable_value: f32,
-        color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
-    ) {
-        self.stable_value_bits = (stable_value * 10000.) as u32;
-
-        let pixels_w = self.size.x as usize;
-        let pixels_h = self.size.y as usize;
-        let coordinates = self.coordinates.clone();
-        let pixels = CachedPickerCartesian::calculate_color_per_pixel(
-            &coordinates,
-            &self.size,
-            stable_value,
-            color_at,
-        );
-
-        let border_positions_px =
-            CachedPickerCartesian::calculate_border_from_pixels(self.size, &pixels);
-        self.border_positions_px = Arc::from(border_positions_px);
-
-        let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
-        self.texture.set(image, egui::TextureOptions::LINEAR);
-    }
-
-    fn update_viewport_bounds(
-        response: &egui::Response,
-        ui_rect: egui::Rect,
-        viewport_bounds: &mut [f32; 4],
-    ) -> bool {
-        let width = viewport_bounds[2] - viewport_bounds[0];
-        let height = viewport_bounds[3] - viewport_bounds[1];
-
-        let mut viewport_changed = false;
-        //
-        // Pan
-        //
-        let is_pan_button_down = response.ctx.input(|i| {
-            i.pointer.button_down(PointerButton::Secondary)
-                || i.pointer.button_down(PointerButton::Middle)
-        });
-        if is_pan_button_down && response.dragged() {
-            viewport_changed = true;
-
-            let drag = response.drag_delta();
-
-            let dx_world = drag.x / ui_rect.width() * width;
-            let dy_world = drag.y / ui_rect.height() * height;
-
-            // Note: y-axis is negative
-            viewport_bounds[0] -= dx_world;
-            viewport_bounds[1] += dy_world;
-            viewport_bounds[2] -= dx_world;
-            viewport_bounds[3] += dy_world;
-        }
-
-        //
-        // Zoom
-        //
-        let scroll = response.ctx.input(|i| i.raw_scroll_delta.y);
-
-        if scroll.abs() > 0.0 {
-            if let Some(mouse_pos) = response.hover_pos() {
-                let nx = (mouse_pos.x - ui_rect.left()) / ui_rect.width();
-                let ny = (mouse_pos.y - ui_rect.top()) / ui_rect.height();
-
-                let mouse_world_x =
-                    viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
-
-                let mouse_world_y =
-                    viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
-
-                {
-                    // Do not zoom if we are already zoomed in rather far
-                    let zoom_factor = if scroll > 0.0 { 0.9 } else { 1.1 };
-
-                    let width = viewport_bounds[2] - viewport_bounds[0];
-                    let height = viewport_bounds[3] - viewport_bounds[1];
-
-                    const MAX_ZOOM_FACTOR: f32 = 7.0;
-                    const WORLD_SIZE: f32 = 4.0; // [0, 1]
-
-                    let min_width = WORLD_SIZE / MAX_ZOOM_FACTOR;
-                    let min_height = WORLD_SIZE / MAX_ZOOM_FACTOR;
-
-                    let new_width = width * zoom_factor;
-                    let new_height = height * zoom_factor;
-
-                    // Prevent further zoom-in once maximum zoom is reached.
-                    if scroll > 0.0 && (new_width < min_width || new_height < min_height) {
-                        // early return to guard against very deep zooms, viewport not changed
-                        return viewport_changed;
-                    }
-                }
-                viewport_changed = true;
-
-                let zoom_factor = if scroll > 0.0 { 0.9 } else { 1.1 };
-
-                viewport_bounds[0] =
-                    mouse_world_x + (viewport_bounds[0] - mouse_world_x) * zoom_factor;
-
-                viewport_bounds[2] =
-                    mouse_world_x + (viewport_bounds[2] - mouse_world_x) * zoom_factor;
-
-                viewport_bounds[1] =
-                    mouse_world_y + (viewport_bounds[1] - mouse_world_y) * zoom_factor;
-
-                viewport_bounds[3] =
-                    mouse_world_y + (viewport_bounds[3] - mouse_world_y) * zoom_factor;
-            }
-        }
-        if viewport_changed {
-            CachedPickerCartesian::clamp_viewport(viewport_bounds)
-        }
-        viewport_changed
-    }
-
-    fn clamp_viewport(viewport: &mut [f32; 4]) {
-        let min_world = 0.0;
-        let max_world = 1.0;
-
-        let mut min_x = viewport[0];
-        let mut min_y = viewport[1];
-        let mut max_x = viewport[2];
-        let mut max_y = viewport[3];
-
-        let width = max_x - min_x;
-        let height = max_y - min_y;
-
-        // -------------------------
-        // 1. Clamp zoom FIRST (uniform bounds)
-        // -------------------------
-        let max_width = max_world - min_world;
-        let max_height = max_world - min_world;
-
-        let width = width.min(max_width);
-        let height = height.min(max_height);
-
-        // compute center BEFORE correction
-        let cx = (min_x + max_x) * 0.5;
-        let cy = (min_y + max_y) * 0.5;
-
-        // rebuild viewport around center (this fixes drift)
-        min_x = cx - width * 0.5;
-        max_x = cx + width * 0.5;
-        min_y = cy - height * 0.5;
-        max_y = cy + height * 0.5;
-
-        // -------------------------
-        // 2. Clamp position (shift as a block)
-        // -------------------------
-        let dx_left = min_world - min_x;
-        let dx_right = max_world - max_x;
-
-        if dx_left > 0.0 {
-            min_x += dx_left;
-            max_x += dx_left;
-        } else if dx_right < 0.0 {
-            min_x += dx_right;
-            max_x += dx_right;
-        }
-
-        let dy_bottom = min_world - min_y;
-        let dy_top = max_world - max_y;
-
-        if dy_bottom > 0.0 {
-            min_y += dy_bottom;
-            max_y += dy_bottom;
-        } else if dy_top < 0.0 {
-            min_y += dy_top;
-            max_y += dy_top;
-        }
-        viewport[0] = min_x;
-        viewport[1] = min_y;
-        viewport[2] = max_x;
-        viewport[3] = max_y;
-    }
-
-    fn calculate_border_from_pixels(size: Vec2, pixels: &Vec<u8>) -> Vec<Pos2> {
-        // Note: same as polar version, consider unifying
-        let pixels_w = size.x as usize;
-        let pixels_h = size.y as usize;
-        let mut border_positions_px = Vec::new();
-        for y in 1..pixels_h - 1 {
-            for x in 1..pixels_w - 1 {
-                let i = (y * pixels_w + x) * 4;
-
-                let valid = pixels[i + 3] != 0;
-                if !valid {
-                    continue;
-                }
-
-                let mut neighbor_invalid = false;
-
-                let mut ni: usize = 0;
-                for dy in -1..=1 {
-                    for dx in -1..=1 {
-                        if dx == 0 && dy == 0 {
-                            continue;
-                        }
-
-                        let nx = (x as i32 + dx) as usize;
-                        let ny = (y as i32 + dy) as usize;
-
-                        ni = (ny * pixels_w + nx) * 4;
-
-                        if pixels[ni + 3] == 0 {
-                            neighbor_invalid = true;
-                            break;
-                        }
-                    }
-                    if neighbor_invalid {
-                        break;
-                    }
-                }
-
-                if neighbor_invalid {
-                    // pixels[ni + 0] = 200;
-                    // pixels[ni + 1] = 0;
-                    // pixels[ni + 2] = 0;
-                    // pixels[ni + 3] = 255;
-                    border_positions_px.push(Pos2 {
-                        x: x as f32,
-                        y: y as f32,
-                    });
-                }
-            }
-        }
-        border_positions_px
-    }
-
-    fn calculate_color_per_pixel(
-        coordinates: &[Pos2],
-        size: &Vec2,
-        stable_value: f32,
-        color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
-    ) -> Vec<u8> {
-        let pixels_w = size.x as usize;
-        let pixels_h = size.y as usize;
-
-        let mut pixels = vec![0 as u8; pixels_w * pixels_h * 4];
-        for i_y in 0..pixels_h {
-            for i_x in 0..pixels_w {
-                let coord_i = i_y * pixels_w + i_x;
-
-                let coord = coordinates[coord_i];
-
-                let (is_valid, color) = color_at(coord.x, coord.y, stable_value);
-
-                if is_valid {
-                    let px_i = (i_y * pixels_w + i_x) * 4;
-                    pixels[px_i] = color.r();
-                    pixels[px_i + 1] = color.g();
-                    pixels[px_i + 2] = color.b();
-                    pixels[px_i + 3] = color.a();
-                }
-            }
-        }
-        // dbg!([minx, miny, maxx, maxy]);
-        pixels
-    }
-
-    fn nearest_valid_border_pixel(&self, coord_px: Pos2) -> Option<Pos2> {
-        let mut min_distance = f32::MAX;
-        let mut min_distance_i = 0;
-        let mut found_nothing = true;
-        let border_positions_px = self.border_positions_px.clone();
-        let viewport_bounds = self.viewport_bounds;
-        for (i, border_px) in border_positions_px.iter().enumerate() {
-            let distance =
-                ((coord_px.x - border_px.x).powi(2) + (coord_px.y - border_px.y).powi(2)).sqrt();
-            if distance < min_distance {
-                min_distance_i = i;
-                min_distance = distance;
-                found_nothing = false;
-            }
-        }
-        if found_nothing {
-            return None;
-        } else {
-            let lab = border_positions_px[min_distance_i];
-            let bla = pixel_to_coordinates(lab, self.size, viewport_bounds);
-            println!("Coord {:?} nearby: {:?}", coord_px, bla);
-            return Some(border_positions_px[min_distance_i]);
-        }
-    }
-
-    fn nearest_valid_color(
-        &self,
-        coord: Pos2,
-        color_at: impl Fn(f32, f32, f32) -> (bool, Color32), // TODO: move to self as function pointer
-    ) -> Color32 {
-        // Here we could sample the pixels vec, but we can also determine the color
-        // based on coordinates. This makes the function less pleasant to use, as we
-        // have to supply the color_at closure, but we would then not need to save
-        // a copy of the texture in RAM.
-        let stable_value = self.stable_value_bits as f32 / 10000.;
-
-        // If color exists at provided values, return the color
-        let (is_valid, color) = color_at(coord.x, coord.y, stable_value);
-        if is_valid {
-            return color;
-        }
-
-        // If color does not exist, return nearest color
-        println!("Fallback color coord: {:?}", &coord);
-        let coord_px = coordinates_to_pixel(
-            Pos2 {
-                x: coord.x,
-                y: 1.0 - coord.y,
-            },
-            self.size,
-            self.viewport_bounds,
-        );
-        let sample_pixel = self.nearest_valid_border_pixel(coord_px);
-        let fallback_color = Color32::BLACK; // Take a look at the values where no possibilities left, what is the last color to disappear? Use that!
-        let color = match sample_pixel {
-            None => fallback_color,
-            Some(sample_px) => {
-                let sample_pos = pixel_to_coordinates(sample_px, self.size, self.viewport_bounds);
-                let (_, color) = color_at(sample_pos.x, 1.0 - sample_pos.y, stable_value);
-                color
-            }
-        };
-        color
-    }
-}
-
-pub fn polar_to_pixel(
-    angle: f32,
-    radius: f32,
-    width: usize,
-    height: usize,
-    viewport_bounds: [f32; 4], // [min_x, min_y, max_x, max_y]
-) -> (f32, f32) {
-    // -----------------------------
-    // 1. polar → WORLD space
-    // -----------------------------
-    let world_x = radius * angle.cos();
-    let world_y = -radius * angle.sin();
-
-    // -----------------------------
-    // 2. WORLD → normalized viewport space [0,1]
-    // -----------------------------
-    let vx = (world_x - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]);
-
-    let vy = (world_y - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]);
-
-    // -----------------------------
-    // 3. normalized → pixel space
-    // -----------------------------
-    let x = vx * width as f32 - 0.5;
-    let y = vy * height as f32 - 0.5;
-
-    (x, y)
-}
-
-pub fn pixel_to_polar(
-    x: f32,
-    y: f32,
-    width: usize,
-    height: usize,
-    viewport_bounds: [f32; 4], // [min_x, min_y, max_x, max_y]
-) -> PolarCoordinate {
-    let nx = (x + 0.5) / width as f32;
-    let ny = (y + 0.5) / height as f32;
-
-    let world_x = viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
-
-    let world_y = viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
-
-    let r_squared = world_x * world_x + world_y * world_y;
-    let r = r_squared.sqrt();
-
-    // Invert Y for correct hue rotation direction
-    let mut angle = fast_math::atan2(-world_y, world_x);
-    if angle < 0.0 {
-        angle += std::f32::consts::TAU;
-    }
-
-    PolarCoordinate { radius: r, angle }
-}
+// impl CachedPickerCartesian {
+//     fn new(
+//         ui: &mut egui::Ui,
+//         size: Vec2,
+//         stable_value: f32,
+//         color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
+//     ) -> CachedPickerCartesian {
+//         let pixels_w = size.x as usize;
+//         let pixels_h = size.y as usize;
+//         let viewport_bounds = [0., 0., 1., 1.];
+//         // let viewport_bounds = [-2., -2., 2., 2.];
+//         // let viewport_bounds = [-1., 0., 1., 1.]; // TODO: ALso create a mode for this, quite nice :)
+//         let coordinates = CachedPickerCartesian::calculate_coordinates(size, viewport_bounds);
+//         let pixels = CachedPickerCartesian::calculate_color_per_pixel(
+//             &coordinates,
+//             &size,
+//             stable_value,
+//             color_at,
+//         );
+//         let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
+//         let texture =
+//             ui.ctx()
+//                 .load_texture("oklch_radial_fixed", image, egui::TextureOptions::LINEAR);
+//         let border_positions_px =
+//             CachedPickerCartesian::calculate_border_from_pixels(size, &pixels);
+//         CachedPickerCartesian {
+//             stable_value_bits: (stable_value * 10000.) as u32,
+//             size: size,
+//             viewport_bounds,
+//             texture: texture,
+//             coordinates: Arc::from(coordinates),
+//             border_positions_px: Arc::from(border_positions_px),
+//             prev_fallback_color_pos: None,
+//         }
+//     }
+
+//     fn calculate_coordinates(size: Vec2, viewport_bounds: [f32; 4]) -> Vec<Pos2> {
+//         let pixels_w = size.x as usize;
+//         let pixels_h = size.y as usize;
+//         let mut coordinates: Vec<Pos2> = Vec::with_capacity(pixels_w * pixels_h);
+
+//         for i_y in 0..pixels_h {
+//             for i_x in 0..pixels_w {
+//                 // let nx = (i_x as f32 + 0.5) / pixels_w as f32;
+//                 // let ny = (i_y as f32 + 0.5) / pixels_h as f32;
+//                 // let x = viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
+//                 // let y = 1.0 - (viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]));
+//                 let coords = pixel_to_coordinates(
+//                     Pos2 {
+//                         x: i_x as f32,
+//                         y: (pixels_h - i_y) as f32,
+//                         // y: i_y as f32,
+//                     },
+//                     size,
+//                     viewport_bounds,
+//                 );
+//                 coordinates.push(coords);
+//             }
+//         }
+//         coordinates
+//     }
+
+//     fn update_coordinates(&mut self, size: Vec2) {
+//         let coords = CachedPickerCartesian::calculate_coordinates(size, self.viewport_bounds);
+//         self.coordinates = Arc::from(coords);
+//     }
+
+//     fn update_pixel_values_and_border_positions_px(
+//         &mut self,
+//         stable_value: f32,
+//         color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
+//     ) {
+//         self.stable_value_bits = (stable_value * 10000.) as u32;
+
+//         let pixels_w = self.size.x as usize;
+//         let pixels_h = self.size.y as usize;
+//         let coordinates = self.coordinates.clone();
+//         let pixels = CachedPickerCartesian::calculate_color_per_pixel(
+//             &coordinates,
+//             &self.size,
+//             stable_value,
+//             color_at,
+//         );
+
+//         let border_positions_px =
+//             CachedPickerCartesian::calculate_border_from_pixels(self.size, &pixels);
+//         self.border_positions_px = Arc::from(border_positions_px);
+
+//         let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
+//         self.texture.set(image, egui::TextureOptions::LINEAR);
+//     }
+
+//     fn update_viewport_bounds(
+//         response: &egui::Response,
+//         ui_rect: egui::Rect,
+//         viewport_bounds: &mut [f32; 4],
+//     ) -> bool {
+//         let width = viewport_bounds[2] - viewport_bounds[0];
+//         let height = viewport_bounds[3] - viewport_bounds[1];
+
+//         let mut viewport_changed = false;
+//         //
+//         // Pan
+//         //
+//         let is_pan_button_down = response.ctx.input(|i| {
+//             i.pointer.button_down(PointerButton::Secondary)
+//                 || i.pointer.button_down(PointerButton::Middle)
+//         });
+//         if is_pan_button_down && response.dragged() {
+//             viewport_changed = true;
+
+//             let drag = response.drag_delta();
+
+//             let dx_world = drag.x / ui_rect.width() * width;
+//             let dy_world = drag.y / ui_rect.height() * height;
+
+//             // Note: y-axis is negative
+//             viewport_bounds[0] -= dx_world;
+//             viewport_bounds[1] += dy_world;
+//             viewport_bounds[2] -= dx_world;
+//             viewport_bounds[3] += dy_world;
+//         }
+
+//         //
+//         // Zoom
+//         //
+//         let scroll = response.ctx.input(|i| i.raw_scroll_delta.y);
+
+//         if scroll.abs() > 0.0 {
+//             if let Some(mouse_pos) = response.hover_pos() {
+//                 let nx = (mouse_pos.x - ui_rect.left()) / ui_rect.width();
+//                 let ny = (mouse_pos.y - ui_rect.top()) / ui_rect.height();
+
+//                 let mouse_world_x =
+//                     viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
+
+//                 let mouse_world_y =
+//                     viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
+
+//                 {
+//                     // Do not zoom if we are already zoomed in rather far
+//                     let zoom_factor = if scroll > 0.0 { 0.9 } else { 1.1 };
+
+//                     let width = viewport_bounds[2] - viewport_bounds[0];
+//                     let height = viewport_bounds[3] - viewport_bounds[1];
+
+//                     const MAX_ZOOM_FACTOR: f32 = 7.0;
+//                     const WORLD_SIZE: f32 = 4.0; // [0, 1]
+
+//                     let min_width = WORLD_SIZE / MAX_ZOOM_FACTOR;
+//                     let min_height = WORLD_SIZE / MAX_ZOOM_FACTOR;
+
+//                     let new_width = width * zoom_factor;
+//                     let new_height = height * zoom_factor;
+
+//                     // Prevent further zoom-in once maximum zoom is reached.
+//                     if scroll > 0.0 && (new_width < min_width || new_height < min_height) {
+//                         // early return to guard against very deep zooms, viewport not changed
+//                         return viewport_changed;
+//                     }
+//                 }
+//                 viewport_changed = true;
+
+//                 let zoom_factor = if scroll > 0.0 { 0.9 } else { 1.1 };
+
+//                 viewport_bounds[0] =
+//                     mouse_world_x + (viewport_bounds[0] - mouse_world_x) * zoom_factor;
+
+//                 viewport_bounds[2] =
+//                     mouse_world_x + (viewport_bounds[2] - mouse_world_x) * zoom_factor;
+
+//                 viewport_bounds[1] =
+//                     mouse_world_y + (viewport_bounds[1] - mouse_world_y) * zoom_factor;
+
+//                 viewport_bounds[3] =
+//                     mouse_world_y + (viewport_bounds[3] - mouse_world_y) * zoom_factor;
+//             }
+//         }
+//         if viewport_changed {
+//             CachedPickerCartesian::clamp_viewport(viewport_bounds)
+//         }
+//         viewport_changed
+//     }
+
+//     fn clamp_viewport(viewport: &mut [f32; 4]) {
+//         let min_world = 0.0;
+//         let max_world = 1.0;
+
+//         let mut min_x = viewport[0];
+//         let mut min_y = viewport[1];
+//         let mut max_x = viewport[2];
+//         let mut max_y = viewport[3];
+
+//         let width = max_x - min_x;
+//         let height = max_y - min_y;
+
+//         // -------------------------
+//         // 1. Clamp zoom FIRST (uniform bounds)
+//         // -------------------------
+//         let max_width = max_world - min_world;
+//         let max_height = max_world - min_world;
+
+//         let width = width.min(max_width);
+//         let height = height.min(max_height);
+
+//         // compute center BEFORE correction
+//         let cx = (min_x + max_x) * 0.5;
+//         let cy = (min_y + max_y) * 0.5;
+
+//         // rebuild viewport around center (this fixes drift)
+//         min_x = cx - width * 0.5;
+//         max_x = cx + width * 0.5;
+//         min_y = cy - height * 0.5;
+//         max_y = cy + height * 0.5;
+
+//         // -------------------------
+//         // 2. Clamp position (shift as a block)
+//         // -------------------------
+//         let dx_left = min_world - min_x;
+//         let dx_right = max_world - max_x;
+
+//         if dx_left > 0.0 {
+//             min_x += dx_left;
+//             max_x += dx_left;
+//         } else if dx_right < 0.0 {
+//             min_x += dx_right;
+//             max_x += dx_right;
+//         }
+
+//         let dy_bottom = min_world - min_y;
+//         let dy_top = max_world - max_y;
+
+//         if dy_bottom > 0.0 {
+//             min_y += dy_bottom;
+//             max_y += dy_bottom;
+//         } else if dy_top < 0.0 {
+//             min_y += dy_top;
+//             max_y += dy_top;
+//         }
+//         viewport[0] = min_x;
+//         viewport[1] = min_y;
+//         viewport[2] = max_x;
+//         viewport[3] = max_y;
+//     }
+
+//     fn calculate_border_from_pixels(size: Vec2, pixels: &Vec<u8>) -> Vec<Pos2> {
+//         // Note: same as polar version, consider unifying
+//         let pixels_w = size.x as usize;
+//         let pixels_h = size.y as usize;
+//         let mut border_positions_px = Vec::new();
+//         for y in 1..pixels_h - 1 {
+//             for x in 1..pixels_w - 1 {
+//                 let i = (y * pixels_w + x) * 4;
+
+//                 let valid = pixels[i + 3] != 0;
+//                 if !valid {
+//                     continue;
+//                 }
+
+//                 let mut neighbor_invalid = false;
+
+//                 let mut ni: usize = 0;
+//                 for dy in -1..=1 {
+//                     for dx in -1..=1 {
+//                         if dx == 0 && dy == 0 {
+//                             continue;
+//                         }
+
+//                         let nx = (x as i32 + dx) as usize;
+//                         let ny = (y as i32 + dy) as usize;
+
+//                         ni = (ny * pixels_w + nx) * 4;
+
+//                         if pixels[ni + 3] == 0 {
+//                             neighbor_invalid = true;
+//                             break;
+//                         }
+//                     }
+//                     if neighbor_invalid {
+//                         break;
+//                     }
+//                 }
+
+//                 if neighbor_invalid {
+//                     // pixels[ni + 0] = 200;
+//                     // pixels[ni + 1] = 0;
+//                     // pixels[ni + 2] = 0;
+//                     // pixels[ni + 3] = 255;
+//                     border_positions_px.push(Pos2 {
+//                         x: x as f32,
+//                         y: y as f32,
+//                     });
+//                 }
+//             }
+//         }
+//         border_positions_px
+//     }
+
+//     fn calculate_color_per_pixel(
+//         coordinates: &[Pos2],
+//         size: &Vec2,
+//         stable_value: f32,
+//         color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
+//     ) -> Vec<u8> {
+//         let pixels_w = size.x as usize;
+//         let pixels_h = size.y as usize;
+
+//         let mut pixels = vec![0 as u8; pixels_w * pixels_h * 4];
+//         for i_y in 0..pixels_h {
+//             for i_x in 0..pixels_w {
+//                 let coord_i = i_y * pixels_w + i_x;
+
+//                 let coord = coordinates[coord_i];
+
+//                 let (is_valid, color) = color_at(coord.x, coord.y, stable_value);
+
+//                 if is_valid {
+//                     let px_i = (i_y * pixels_w + i_x) * 4;
+//                     pixels[px_i] = color.r();
+//                     pixels[px_i + 1] = color.g();
+//                     pixels[px_i + 2] = color.b();
+//                     pixels[px_i + 3] = color.a();
+//                 }
+//             }
+//         }
+//         // dbg!([minx, miny, maxx, maxy]);
+//         pixels
+//     }
+
+//     fn nearest_valid_border_pixel(&self, coord_px: Pos2) -> Option<Pos2> {
+//         let mut min_distance = f32::MAX;
+//         let mut min_distance_i = 0;
+//         let mut found_nothing = true;
+//         let border_positions_px = self.border_positions_px.clone();
+//         let viewport_bounds = self.viewport_bounds;
+//         for (i, border_px) in border_positions_px.iter().enumerate() {
+//             let distance =
+//                 ((coord_px.x - border_px.x).powi(2) + (coord_px.y - border_px.y).powi(2)).sqrt();
+//             if distance < min_distance {
+//                 min_distance_i = i;
+//                 min_distance = distance;
+//                 found_nothing = false;
+//             }
+//         }
+//         if found_nothing {
+//             return None;
+//         } else {
+//             let lab = border_positions_px[min_distance_i];
+//             let bla = pixel_to_coordinates(lab, self.size, viewport_bounds);
+//             println!("Coord {:?} nearby: {:?}", coord_px, bla);
+//             return Some(border_positions_px[min_distance_i]);
+//         }
+//     }
+
+//     fn nearest_valid_color(
+//         &self,
+//         coord: Pos2,
+//         color_at: impl Fn(f32, f32, f32) -> (bool, Color32), // TODO: move to self as function pointer
+//     ) -> Color32 {
+//         // Here we could sample the pixels vec, but we can also determine the color
+//         // based on coordinates. This makes the function less pleasant to use, as we
+//         // have to supply the color_at closure, but we would then not need to save
+//         // a copy of the texture in RAM.
+//         let stable_value = self.stable_value_bits as f32 / 10000.;
+
+//         // If color exists at provided values, return the color
+//         let (is_valid, color) = color_at(coord.x, coord.y, stable_value);
+//         if is_valid {
+//             return color;
+//         }
+
+//         // If color does not exist, return nearest color
+//         println!("Fallback color coord: {:?}", &coord);
+//         let coord_px = coordinates_to_pixel(
+//             Pos2 {
+//                 x: coord.x,
+//                 y: 1.0 - coord.y,
+//             },
+//             self.size,
+//             self.viewport_bounds,
+//         );
+//         let sample_pixel = self.nearest_valid_border_pixel(coord_px);
+//         let fallback_color = Color32::BLACK; // Take a look at the values where no possibilities left, what is the last color to disappear? Use that!
+//         let color = match sample_pixel {
+//             None => fallback_color,
+//             Some(sample_px) => {
+//                 let sample_pos = pixel_to_coordinates(sample_px, self.size, self.viewport_bounds);
+//                 let (_, color) = color_at(sample_pos.x, 1.0 - sample_pos.y, stable_value);
+//                 color
+//             }
+//         };
+//         color
+//     }
+// }
 
 struct Pos {
     x: usize,
     y: usize,
-}
-
-pub fn nearest_valid_coord(
-    pixels: &[u8],
-    width: usize,
-    height: usize,
-    radial_value: f32,
-    angle_value: f32,
-    viewport_bounds: [f32; 4],
-) -> Option<Pos> {
-    let (start_x, start_y) =
-        polar_to_pixel(angle_value, radial_value, width, height, viewport_bounds);
-    let start_x = start_x as usize;
-    let start_y = start_y as usize;
-
-    let idx = |x: usize, y: usize| (y * width + x) * 4;
-
-    let is_valid = |x: usize, y: usize| -> bool { pixels[idx(x, y) + 3] != 0 };
-
-    let start_x = start_x.min(width).max(0);
-    let start_y = start_y.min(height).max(0);
-
-    // early exit
-    if is_valid(start_x, start_y) {
-        return Some(Pos {
-            x: start_x,
-            y: start_y,
-        });
-    }
-
-    // Diagonal distance as max search distance
-    let max_r = (width * width + height * height).isqrt();
-
-    for r in 1..max_r {
-        let x0 = start_x.saturating_sub(r);
-        let x1 = (start_x + r).min(width - 1);
-        let y0 = start_y.saturating_sub(r);
-        let y1 = (start_y + r).min(height - 1);
-
-        // top + bottom edges
-        for x in x0..=x1 {
-            if y0 < height && is_valid(x, y0) {
-                return Some(Pos { x, y: y0 });
-            }
-            if y1 < height && is_valid(x, y1) {
-                return Some(Pos { x, y: y1 });
-            }
-        }
-
-        // left + right edges
-        for y in (y0 + 1)..y1 {
-            if x0 < width && is_valid(x0, y) {
-                return Some(Pos { x: x0, y });
-            }
-            if x1 < width && is_valid(x1, y) {
-                return Some(Pos { x: x1, y });
-            }
-        }
-    }
-
-    None
 }
 
 pub fn tex_coord_to_lch(
@@ -1642,263 +1163,263 @@ pub fn tex_coord_to_lch(
     to_lch(angle, radius, stable_value)
 }
 
-fn color_slider_2d_radial(
-    ui: &mut Ui,
-    stable_value: f32,
-    angle_value: &mut f32,
-    radial_value: &mut f32,
-    invert_radial_value: bool,
-    color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
-    ui_identifyable_label: &str,
-) -> (Response, bool) {
-    let desired_size = Vec2::splat(ui.spacing().slider_width);
-    let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
+// fn color_slider_2d_radial(
+//     ui: &mut Ui,
+//     stable_value: f32,
+//     angle_value: &mut f32,
+//     radial_value: &mut f32,
+//     invert_radial_value: bool,
+//     color_at: impl Fn(f32, f32, f32) -> (bool, Color32),
+//     ui_identifyable_label: &str,
+// ) -> (Response, bool) {
+//     let desired_size = Vec2::splat(ui.spacing().slider_width);
+//     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 
-    let size = response.rect.size();
-    let ui_center = rect.center();
-    let radius = rect.width().min(rect.height()) * 0.5;
+//     let size = response.rect.size();
+//     let ui_center = rect.center();
+//     let radius = rect.width().min(rect.height()) * 0.5;
 
-    // Get picker info
-    let picker_id = ui.id().with(ui_identifyable_label);
-    let mut picker_cache = ui.data(|d| d.get_temp::<CachedPicker>(picker_id));
+//     // Get picker info
+//     let picker_id = ui.id().with(ui_identifyable_label);
+//     let mut picker_cache = ui.data(|d| d.get_temp::<CachedPicker>(picker_id));
 
-    let mut picker_info = match picker_cache {
-        None => CachedPicker::new(ui, size, stable_value, invert_radial_value, &color_at),
-        Some(picker_info) => picker_info,
-    };
+//     let mut picker_info = match picker_cache {
+//         None => CachedPicker::new(ui, size, stable_value, invert_radial_value, &color_at),
+//         Some(picker_info) => picker_info,
+//     };
 
-    // Mouse pointer interaction
-    let is_lmb_down = response
-        .ctx
-        .input(|i| i.pointer.button_down(PointerButton::Primary));
-    if is_lmb_down {
-        if let Some(mpos) = response.interact_pointer_pos() {
-            // FIXME: selected position makes oval shape when hue is dragged!
+//     // Mouse pointer interaction
+//     let is_lmb_down = response
+//         .ctx
+//         .input(|i| i.pointer.button_down(PointerButton::Primary));
+//     if is_lmb_down {
+//         if let Some(mpos) = response.interact_pointer_pos() {
+//             // FIXME: selected position makes oval shape when hue is dragged!
 
-            // 1. normalize mouse in UI space [0,1]
-            let nx = (mpos.x - response.rect.left()) / size.x;
-            let ny = (mpos.y - response.rect.top()) / size.y;
+//             // 1. normalize mouse in UI space [0,1]
+//             let nx = (mpos.x - response.rect.left()) / size.x;
+//             let ny = (mpos.y - response.rect.top()) / size.y;
 
-            // 2. convert to WORLD space using viewport
-            let viewport_bounds = picker_info.viewport_bounds;
-            let vx = viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
+//             // 2. convert to WORLD space using viewport
+//             let viewport_bounds = picker_info.viewport;
+//             let vx = viewport_bounds[0] + nx * (viewport_bounds[2] - viewport_bounds[0]);
 
-            let vy = viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
+//             let vy = viewport_bounds[1] + ny * (viewport_bounds[3] - viewport_bounds[1]);
 
-            // 3. convert world → polar
-            let r = (vx * vx + vy * vy).sqrt().clamp(0.0, 1.0);
+//             // 3. convert world → polar
+//             let r = (vx * vx + vy * vy).sqrt().clamp(0.0, 1.0);
 
-            let angle = (-vy).atan2(vx);
+//             let angle = (-vy).atan2(vx);
 
-            let mut h = angle / std::f32::consts::TAU;
-            if h < 0.0 {
-                h += 1.0;
-            }
+//             let mut h = angle / std::f32::consts::TAU;
+//             if h < 0.0 {
+//                 h += 1.0;
+//             }
 
-            *angle_value = h.clamp(0.0, 1.0);
-            *radial_value = if invert_radial_value { 1.0 - r } else { r };
-        }
-    }
+//             *angle_value = h.clamp(0.0, 1.0);
+//             *radial_value = if invert_radial_value { 1.0 - r } else { r };
+//         }
+//     }
 
-    let mut viewport_contains_picked_color = false; // default in case rect not visible
-    let mut color_is_valid = false; // default in case rect not visible
+//     let mut viewport_contains_picked_color = false; // default in case rect not visible
+//     let mut color_is_valid = false; // default in case rect not visible
 
-    if ui.is_rect_visible(rect) {
-        let size = rect.size();
+//     if ui.is_rect_visible(rect) {
+//         let size = rect.size();
 
-        // Radial lines on background
-        let painter = ui.painter().with_clip_rect(response.rect);
-        let viewport_bounds = picker_info.viewport_bounds;
-        let cx = response.rect.left()
-            + ((0.0 - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]))
-                * response.rect.width();
+//         // Radial lines on background
+//         let painter = ui.painter().with_clip_rect(response.rect);
+//         let viewport_bounds = picker_info.viewport_bounds;
+//         let cx = response.rect.left()
+//             + ((0.0 - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]))
+//                 * response.rect.width();
 
-        let cy = response.rect.top()
-            + ((0.0 - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]))
-                * response.rect.height();
+//         let cy = response.rect.top()
+//             + ((0.0 - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]))
+//                 * response.rect.height();
 
-        let world_to_screen = response.rect.width() / (viewport_bounds[2] - viewport_bounds[0]);
+//         let world_to_screen = response.rect.width() / (viewport_bounds[2] - viewport_bounds[0]);
 
-        for i in 0..6 {
-            let world_r = 0.01 + 0.15 * i as f32;
-            let screen_r = world_r * world_to_screen;
+//         for i in 0..6 {
+//             let world_r = 0.01 + 0.15 * i as f32;
+//             let screen_r = world_r * world_to_screen;
 
-            painter.circle(
-                Pos2::new(cx, cy),
-                screen_r,
-                Color32::TRANSPARENT,
-                egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(200, 200, 200, 100)),
-            );
-        }
+//             painter.circle(
+//                 Pos2::new(cx, cy),
+//                 screen_r,
+//                 Color32::TRANSPARENT,
+//                 egui::Stroke::new(1.0, Color32::from_rgba_unmultiplied(200, 200, 200, 100)),
+//             );
+//         }
 
-        let stable_value_bits = (stable_value * 10000.) as u32;
-        let stable_value_changed = picker_info.stable_value_bits != stable_value_bits;
-        let size_changed = picker_info.size != size;
-        if size_changed {
-            picker_info.update_polar_coordinates(size);
-        }
-        if size_changed || stable_value_changed {
-            picker_info.update_pixel_values_and_border_positions_px(
-                stable_value,
-                invert_radial_value,
-                &color_at,
-            );
-        }
+//         let stable_value_bits = (stable_value * 10000.) as u32;
+//         let stable_value_changed = picker_info.stable_value_bits != stable_value_bits;
+//         let size_changed = picker_info.size != size;
+//         if size_changed {
+//             picker_info.update_polar_coordinates(size);
+//         }
+//         if size_changed || stable_value_changed {
+//             picker_info.update_pixel_values_and_border_positions_px(
+//                 stable_value,
+//                 invert_radial_value,
+//                 &color_at,
+//             );
+//         }
 
-        // Maybe unify with conditions above
-        let viewport_changed =
-            CachedPicker::update_viewport_bounds(&response, rect, &mut picker_info.viewport_bounds);
-        if viewport_changed {
-            picker_info.update_polar_coordinates(size);
-            picker_info.update_pixel_values_and_border_positions_px(
-                stable_value,
-                invert_radial_value,
-                &color_at,
-            );
-        }
+//         // Maybe unify with conditions above
+//         let viewport_changed =
+//             CachedPicker::update_viewport_bounds(&response, rect, &mut picker_info.viewport_bounds);
+//         if viewport_changed {
+//             picker_info.update_polar_coordinates(size);
+//             picker_info.update_pixel_values_and_border_positions_px(
+//                 stable_value,
+//                 invert_radial_value,
+//                 &color_at,
+//             );
+//         }
 
-        let sample_radius = if invert_radial_value {
-            (1.0 - *radial_value).clamp(0.0, 1.0)
-        } else {
-            (*radial_value).clamp(0.0, 1.0)
-        };
+//         let sample_radius = if invert_radial_value {
+//             (1.0 - *radial_value).clamp(0.0, 1.0)
+//         } else {
+//             (*radial_value).clamp(0.0, 1.0)
+//         };
 
-        let tex = picker_info.texture.clone();
-        painter.image(
-            tex.id(),
-            rect,
-            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-            Color32::WHITE,
-        );
+//         let tex = picker_info.texture.clone();
+//         painter.image(
+//             tex.id(),
+//             rect,
+//             Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+//             Color32::WHITE,
+//         );
 
-        let visuals = ui.style().interact(&response);
-        painter.rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
+//         let visuals = ui.style().interact(&response);
+//         painter.rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
 
-        // Handle
-        let angle = *angle_value * std::f32::consts::TAU;
+//         // Handle
+//         let angle = *angle_value * std::f32::consts::TAU;
 
-        let r = if invert_radial_value {
-            1.0 - *radial_value
-        } else {
-            *radial_value
-        };
+//         let r = if invert_radial_value {
+//             1.0 - *radial_value
+//         } else {
+//             *radial_value
+//         };
 
-        // -----------------------------
-        // 1. Polar → WORLD space
-        // -----------------------------
-        let wx = angle.cos() * r;
-        let wy = -angle.sin() * r;
+//         // -----------------------------
+//         // 1. Polar → WORLD space
+//         // -----------------------------
+//         let wx = angle.cos() * r;
+//         let wy = -angle.sin() * r;
 
-        // -----------------------------
-        // 2. WORLD → SCREEN space
-        // -----------------------------
-        let size = ui_center * 2.0; // or response.rect.size()
+//         // -----------------------------
+//         // 2. WORLD → SCREEN space
+//         // -----------------------------
+//         let size = ui_center * 2.0; // or response.rect.size()
 
-        let viewport_bounds = picker_info.viewport_bounds;
-        let nx = (wx - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]);
+//         let viewport_bounds = picker_info.viewport_bounds;
+//         let nx = (wx - viewport_bounds[0]) / (viewport_bounds[2] - viewport_bounds[0]);
 
-        let ny = (wy - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]);
+//         let ny = (wy - viewport_bounds[1]) / (viewport_bounds[3] - viewport_bounds[1]);
 
-        let x = response.rect.left() + nx * response.rect.width();
-        let y = response.rect.top() + ny * response.rect.height();
+//         let x = response.rect.left() + nx * response.rect.width();
+//         let y = response.rect.top() + ny * response.rect.height();
 
-        let marker_pos = Pos2::new(x, y);
-        viewport_contains_picked_color = response.rect.contains(marker_pos);
+//         let marker_pos = Pos2::new(x, y);
+//         viewport_contains_picked_color = response.rect.contains(marker_pos);
 
-        // -----------------------------
-        // 3. Color sampling MUST also use world-space mapping
-        // -----------------------------
-        let (is_valid, color) =
-            color_at(angle / std::f32::consts::TAU, *radial_value, stable_value);
-        color_is_valid = is_valid;
+//         // -----------------------------
+//         // 3. Color sampling MUST also use world-space mapping
+//         // -----------------------------
+//         let (is_valid, color) =
+//             color_at(angle / std::f32::consts::TAU, *radial_value, stable_value);
+//         color_is_valid = is_valid;
 
-        let (indicator_color, marker_angle) = if is_valid {
-            (Color32::WHITE, 45.)
-        } else {
-            (Color32::WHITE, 0.)
-        };
+//         let (indicator_color, marker_angle) = if is_valid {
+//             (Color32::WHITE, 45.)
+//         } else {
+//             (Color32::WHITE, 0.)
+//         };
 
-        draw_inward_triangles(
-            &painter,
-            marker_pos,
-            4.0,
-            4.0,
-            4,
-            marker_angle,
-            indicator_color,
-            Stroke {
-                width: 0.5,
-                color: Color32::BLACK,
-            },
-        );
-        // Draw indicator at loction of fallback color
-        if is_valid {
-            picker_info.prev_fallback_color_pos = Some(PolarCoordinate {
-                radius: sample_radius,
-                // radius: *radial_value,
-                angle,
-            });
-        } else {
-            let fallback_color_pos = if viewport_contains_picked_color {
-                let fallback_color_pos = picker_info.nearest_valid_border_coord(r, angle);
-                let fallback_color_pos_polar = match fallback_color_pos {
-                    Some(pos) => Some(pixel_to_polar(
-                        pos.x,
-                        pos.y,
-                        picker_info.size.x as usize,
-                        picker_info.size.y as usize,
-                        picker_info.viewport_bounds,
-                    )),
-                    None => None,
-                };
-                picker_info.prev_fallback_color_pos = fallback_color_pos_polar;
-                fallback_color_pos // Return xy, not polar
-            } else {
-                let fallback_color_pos_polar = picker_info.prev_fallback_color_pos;
-                let fallback_color_pos = match fallback_color_pos_polar {
-                    Some(polar_pos) => {
-                        let (x, y) = polar_to_pixel(
-                            polar_pos.angle,
-                            polar_pos.radius,
-                            picker_info.size.x as usize,
-                            picker_info.size.y as usize,
-                            picker_info.viewport_bounds,
-                        );
-                        Some(Pos2 { x, y })
-                    }
-                    None => None,
-                };
-                fallback_color_pos
-            };
-            // let color = picker_info.nearest_valid_color(angle, r, invert_radial_value, &color_at);
-            if let Some(pos) = fallback_color_pos {
-                draw_inward_triangles(
-                    &painter,
-                    pos + rect.min.to_vec2(),
-                    3.0,  // radius
-                    3.0,  // size
-                    4,    // count
-                    45.0, // radial-offset
-                    Color32::WHITE,
-                    Stroke {
-                        width: 0.5,
-                        color: Color32::BLACK,
-                    },
-                );
-            }
-        }
+//         draw_inward_triangles(
+//             &painter,
+//             marker_pos,
+//             4.0,
+//             4.0,
+//             4,
+//             marker_angle,
+//             indicator_color,
+//             Stroke {
+//                 width: 0.5,
+//                 color: Color32::BLACK,
+//             },
+//         );
+//         // Draw indicator at loction of fallback color
+//         if is_valid {
+//             picker_info.prev_fallback_color_pos = Some(PolarCoordinate {
+//                 radius: sample_radius,
+//                 // radius: *radial_value,
+//                 angle,
+//             });
+//         } else {
+//             let fallback_color_pos = if viewport_contains_picked_color {
+//                 let fallback_color_pos = picker_info.nearest_valid_border_coord(r, angle);
+//                 let fallback_color_pos_polar = match fallback_color_pos {
+//                     Some(pos) => Some(pixel_to_polar(
+//                         pos.x,
+//                         pos.y,
+//                         picker_info.size.x as usize,
+//                         picker_info.size.y as usize,
+//                         picker_info.viewport_bounds,
+//                     )),
+//                     None => None,
+//                 };
+//                 picker_info.prev_fallback_color_pos = fallback_color_pos_polar;
+//                 fallback_color_pos // Return xy, not polar
+//             } else {
+//                 let fallback_color_pos_polar = picker_info.prev_fallback_color_pos;
+//                 let fallback_color_pos = match fallback_color_pos_polar {
+//                     Some(polar_pos) => {
+//                         let (x, y) = polar_to_pixel(
+//                             polar_pos.angle,
+//                             polar_pos.radius,
+//                             picker_info.size.x as usize,
+//                             picker_info.size.y as usize,
+//                             picker_info.viewport_bounds,
+//                         );
+//                         Some(Pos2 { x, y })
+//                     }
+//                     None => None,
+//                 };
+//                 fallback_color_pos
+//             };
+//             // let color = picker_info.nearest_valid_color(angle, r, invert_radial_value, &color_at);
+//             if let Some(pos) = fallback_color_pos {
+//                 draw_inward_triangles(
+//                     &painter,
+//                     pos + rect.min.to_vec2(),
+//                     3.0,  // radius
+//                     3.0,  // size
+//                     4,    // count
+//                     45.0, // radial-offset
+//                     Color32::WHITE,
+//                     Stroke {
+//                         width: 0.5,
+//                         color: Color32::BLACK,
+//                     },
+//                 );
+//             }
+//         }
 
-        ui.data_mut(|d| {
-            d.insert_temp(picker_id, picker_info.clone());
-        });
-    }
+//         ui.data_mut(|d| {
+//             d.insert_temp(picker_id, picker_info.clone());
+//         });
+//     }
 
-    if response.is_pointer_button_down_on() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::None);
-    }
+//     if response.is_pointer_button_down_on() {
+//         ui.ctx().set_cursor_icon(egui::CursorIcon::None);
+//     }
 
-    (response, viewport_contains_picked_color || color_is_valid)
-}
+//     (response, viewport_contains_picked_color || color_is_valid)
+// }
 
 #[derive(Debug, Clone)]
 enum OKLabPlotType {
@@ -1960,11 +1481,13 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
         input_type_button_ui(ui);
 
         // TODO: get nearest color! nocheckin
-        let (is_valid, color) = oklch_to_color32(Oklch {
+        let color_sample = oklch_to_color32(Oklch {
             l,
             c: c * 0.325,
             h: h * std::f32::consts::TAU,
         });
+        // TODO: what about color_sample.valid?
+        let color = color_sample.color;
 
         if ui
             .button("📋")
@@ -1992,120 +1515,92 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
         state.h = lch.h / std::f32::consts::TAU;
     }
 
-    let (_, display_color) = oklch_to_color32(lch.clone()); // technically the color from previous frame, but I want to display this above the 2d picker
-    show_srgba_unmultiplied(ui, display_color.to_array(), current_color_size)
+    let color_sample = oklch_to_color32(lch.clone()); // technically the color from previous frame, but I want to display this above the 2d picker
+    show_srgba_unmultiplied(ui, color_sample.color.to_array(), current_color_size)
         .on_hover_text("Selected color");
 
     let new_color = match tab {
         OKLabPlotType::StableHue => {
-            let ui_identifyable_label = "StableHueColorPicker";
-            let (_response, update_color_) = color_slider_2d_grid_oklch(
-                ui,
-                &mut state.c,
-                &mut state.l,
-                state.h * std::f32::consts::TAU,
-                |x, y, stable_value| {
-                    oklch_to_color32(Oklch {
-                        l: y,
-                        // l: 1.0 - y,
-                        c: x * 0.325,
-                        h: stable_value,
-                    })
-                },
-                ui_identifyable_label,
-            );
-            update_color = update_color_;
-            let picker_id = ui.id().with(ui_identifyable_label);
-            // let picker_info = ui.data(|d| d.get_temp::<CachedPickerCartesian>(picker_id).unwrap()); // Has to have been set by color_slider_2d_radial.
-            let picker_info_opt = ui.data(|d| d.get_temp::<CachedPickerCartesian>(picker_id));
-            let picked_color = match picker_info_opt {
-                Some(picker_info) => picker_info.nearest_valid_color(
-                    Pos2 {
-                        // x: state.c * 0.325,
-                        x: state.c,
-                        y: state.l,
-                    },
-                    |x, y, stable| {
-                        oklch_to_color32(Oklch {
-                            l: y,
-                            // l: 1.0 - y,
-                            c: x * 0.325,
-                            // c: x,
-                            h: stable,
-                        })
-                    },
-                ),
-                None => Color32::CYAN,
+            let projection = StableHueProjection {
+                hue: state.h * std::f32::consts::TAU,
             };
-            picked_color
+
+            let mut coord = CartesianCoord {
+                x: state.c,
+                y: state.l,
+            };
+
+            let _response = color_slider_2d::<CartesianTransform, StableHueProjection>(
+                ui,
+                &mut coord,
+                projection,
+                "StableHueColorPicker",
+            );
+
+            state.c = coord.x;
+            state.l = coord.y;
+
+            let picker_id = ui.id().with("StableHueColorPicker");
+
+            let picker = ui
+                .data(|d| d.get_temp::<StableHuePicker>(picker_id))
+                .unwrap();
+
+            picker.nearest_valid_color(coord)
         }
+
         OKLabPlotType::StableChroma => {
-            let ui_identifyable_label = "StableChromeColorPicker";
-            let (_response, update_color_) = color_slider_2d_radial(
+            let projection = StableChromaProjection { chroma: state.c };
+
+            let mut coord = PolarCoord {
+                angle: state.h * std::f32::consts::TAU,
+                radius: 1.0 - state.l,
+            };
+
+            let _response = color_slider_2d::<PolarTransform, StableChromaProjection>(
                 ui,
-                state.c,
-                &mut state.h,
-                &mut state.l,
-                true,
-                |angle, radian, stable| {
-                    oklch_to_color32(Oklch {
-                        l: radian,
-                        c: stable * 0.325,
-                        h: angle * std::f32::consts::TAU,
-                    })
-                },
-                ui_identifyable_label,
+                &mut coord,
+                projection,
+                "StableChromaColorPicker",
             );
-            update_color = update_color_;
-            let picker_id = ui.id().with(ui_identifyable_label);
-            let picker_info = ui.data(|d| d.get_temp::<CachedPicker>(picker_id).unwrap()); // Has to have been set by color_slider_2d_radial.
-            let picked_color = picker_info.nearest_valid_color(
-                state.h * std::f32::consts::TAU,
-                (1.0 - state.l).clamp(0.0, 1.0),
-                true,
-                |angle, radian, stable| {
-                    oklch_to_color32(Oklch {
-                        l: radian,
-                        c: stable * 0.325,
-                        h: angle * std::f32::consts::TAU,
-                    })
-                },
-            );
-            picked_color
+
+            state.h = coord.angle / std::f32::consts::TAU;
+            state.l = 1.0 - coord.radius;
+
+            let picker_id = ui.id().with("StableChromaColorPicker");
+
+            let picker = ui
+                .data(|d| d.get_temp::<StableChromaPicker>(picker_id))
+                .unwrap();
+
+            picker.nearest_valid_color(coord)
         }
+
         OKLabPlotType::StableLightness => {
-            let ui_identifyable_label = "StableLightnessColorPicker";
-            let (_response, update_color_) = color_slider_2d_radial(
+            let projection = StableLightnessProjection { lightness: state.l };
+
+            let mut coord = PolarCoord {
+                angle: state.h * std::f32::consts::TAU,
+                radius: state.c,
+            };
+
+            let _response = color_slider_2d::<PolarTransform, StableLightnessProjection>(
                 ui,
-                state.l,
-                &mut state.h,
-                &mut state.c,
-                false,
-                |angle, radian, stable| {
-                    oklch_to_color32(Oklch {
-                        l: stable,
-                        c: radian * 0.325,
-                        h: angle * std::f32::consts::TAU,
-                    })
-                },
-                ui_identifyable_label,
+                &mut coord,
+                projection,
+                "StableLightnessColorPicker",
             );
-            update_color = update_color_;
-            let picker_id = ui.id().with(ui_identifyable_label);
-            let picker_info = ui.data(|d| d.get_temp::<CachedPicker>(picker_id).unwrap()); // Has to have been set by color_slider_2d_radial.
-            let picked_color = picker_info.nearest_valid_color(
-                state.h * std::f32::consts::TAU,
-                (state.c).clamp(0.0, 1.0),
-                false,
-                |angle, radian, stable| {
-                    oklch_to_color32(Oklch {
-                        l: stable,
-                        c: radian * 0.325,
-                        h: angle * std::f32::consts::TAU,
-                    })
-                },
-            );
-            picked_color
+
+            state.h = coord.angle / std::f32::consts::TAU;
+            state.c = coord.radius;
+
+            let picker_id = ui.id().with("StableLightnessColorPicker");
+
+            let picker = ui
+                .data(|d| d.get_temp::<StableLightnessPicker>(picker_id))
+                .unwrap();
+
+            picker.nearest_valid_color(coord)
         }
     };
     // show_srgba_unmultiplied(ui, new_color.to_array(), current_color_size)
@@ -2117,7 +1612,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
             ui,
             &mut state.l,
             lch.l,
-            display_color,
+            color_sample.color,
             |l_mut| oklch_to_color32(Oklch { l: l_mut, c, h }),
             None::<fn(f32) -> Color32>,
             &"lightness",
@@ -2138,7 +1633,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
             ui,
             &mut state.c,
             lch.c / 0.325,
-            display_color,
+            color_sample.color,
             |c_mut| {
                 oklch_to_color32(Oklch {
                     l,
@@ -2164,12 +1659,12 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
     // --- Hue slider ---
     let determine_hue_slider_colors = |h_mut| {
         // Define lightness and chroma that exist for all hues
-        let (_, bg_color) = oklch_to_color32(Oklch {
+        let bg_color_sample = oklch_to_color32(Oklch {
             l: 0.750,
             c: 0.127,
             h: h_mut * std::f32::consts::TAU,
         });
-        let bg_color = bg_color.blend(Color32::from_black_alpha(40));
+        let bg_color = bg_color_sample.color.blend(Color32::from_black_alpha(40));
         let color = Color32::from_rgba_unmultiplied(bg_color.r(), bg_color.g(), bg_color.b(), 210);
         color
     };
@@ -2178,7 +1673,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
             ui,
             &mut state.h,
             lch.h / std::f32::consts::TAU,
-            display_color,
+            color_sample.color,
             |h_mut| {
                 oklch_to_color32(Oklch {
                     l: l,

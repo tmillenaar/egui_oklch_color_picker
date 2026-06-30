@@ -1,5 +1,7 @@
 #![allow(clippy::excessive_precision)]
 
+use crate::color_projection::*;
+
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct Oklab {
     pub l: f32,
@@ -147,7 +149,7 @@ pub fn oklch_to_oklab(c: Oklch) -> Oklab {
 //     }
 // }
 
-pub fn oklch_to_color32(c: Oklch) -> (bool, crate::Color32) {
+pub fn oklch_to_color32(c: Oklch) -> ColorSample {
     let (is_valid, linear) = oklab_to_linear_srgb(oklch_to_oklab(c));
 
     let srgb = linear_srgb_to_srgb(linear);
@@ -157,7 +159,10 @@ pub fn oklch_to_color32(c: Oklch) -> (bool, crate::Color32) {
         (srgb.g * 255.0) as u8,
         (srgb.b * 255.0) as u8,
     );
-    (is_valid, color)
+    ColorSample {
+        valid: is_valid,
+        color,
+    }
 }
 
 pub fn color32_to_oklch(color: crate::Color32) -> Oklch {
