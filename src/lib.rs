@@ -420,7 +420,7 @@ pub fn color_slider_2d<T, P>(
     coord: &mut T::Coord,
     projection: P,
     ui_identifiable_label: &str,
-) -> Response
+) -> (Response, bool)
 where
     T: CoordinateTransform + Send + Sync + 'static,
     T::Coord: Clone + Copy + PartialEq,
@@ -448,6 +448,9 @@ where
         picker.update_texture();
     }
 
+    let mut color_is_valid = false;
+    let mut viewport_contains_picked_color = false;
+
     if ui.is_rect_visible(rect) {
         let painter = ui.painter().with_clip_rect(rect);
 
@@ -461,6 +464,71 @@ where
         let visuals = ui.style().interact(&response);
 
         painter.rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
+
+        // Obtain color sample
+        let sample = picker.projection.color_at(*coord);
+        color_is_valid = sample.valid;
+
+        // Draw marker
+        let marker_pos = picker.coord_to_pixel(*coord);
+        let (indicator_color, marker_angle) = if sample.valid {
+            (Color32::WHITE, 45.)
+        } else {
+            (Color32::WHITE, 0.)
+        };
+
+        let marker_pos = picker.coord_to_pixel(*coord);
+        viewport_contains_picked_color = marker_pos.x >= 0.0
+            && marker_pos.x <= rect.width()
+            && marker_pos.y >= 0.0
+            && marker_pos.y <= rect.height();
+
+        draw_inward_triangles(
+            &painter,
+            marker_pos + rect.min.to_vec2(),
+            4.0,
+            4.0,
+            4,
+            marker_angle,
+            indicator_color,
+            Stroke {
+                width: 0.5,
+                color: Color32::BLACK,
+            },
+        );
+        if sample.valid {
+            picker.previous_fallback = Some(*coord);
+        } else {
+            let fallback_coord = if viewport_contains_picked_color {
+                let fallback = picker.nearest_valid_border_coord(*coord);
+                picker.previous_fallback = fallback;
+                fallback
+            } else {
+                picker.previous_fallback
+            };
+
+            if let Some(coord) = fallback_coord {
+                let pos = picker.coord_to_pixel(coord);
+
+                draw_inward_triangles(
+                    &painter,
+                    pos + rect.min.to_vec2(),
+                    3.0,
+                    3.0,
+                    4,
+                    45.0,
+                    Color32::WHITE,
+                    Stroke {
+                        width: 0.5,
+                        color: Color32::BLACK,
+                    },
+                );
+            }
+        }
+    }
+
+    if response.is_pointer_button_down_on() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::None);
     }
 
     // Mouse interaction.
@@ -482,7 +550,7 @@ where
         d.insert_temp(picker_id, picker);
     });
 
-    response
+    (response, viewport_contains_picked_color || color_is_valid)
 }
 
 // fn color_slider_2d_grid_oklch(
@@ -1519,7 +1587,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
     show_srgba_unmultiplied(ui, color_sample.color.to_array(), current_color_size)
         .on_hover_text("Selected color");
 
-    let new_color = match tab {
+    let (new_color, update_color) = match tab {
         OKLabPlotType::StableHue => {
             let projection = StableHueProjection {
                 hue: state.h * std::f32::consts::TAU,
@@ -1530,11 +1598,11 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
                 y: state.l,
             };
 
-            let _response = color_slider_2d::<CartesianTransform, StableHueProjection>(
-                ui,
-                &mut coord,
-                projection,
-                "StableHueColorPicker",
+            let (_response, update_color) = color_slider_2d::<
+                CartesianTransform,
+                StableHueProjection,
+            >(
+                ui, &mut coord, projection, "StableHueColorPicker"
             );
 
             state.c = coord.x;
@@ -1546,7 +1614,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
                 .data(|d| d.get_temp::<StableHuePicker>(picker_id))
                 .unwrap();
 
-            picker.nearest_valid_color(coord)
+            (picker.nearest_valid_color(coord), update_color)
         }
 
         OKLabPlotType::StableChroma => {
@@ -1557,7 +1625,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
                 radius: 1.0 - state.l,
             };
 
-            let _response = color_slider_2d::<PolarTransform, StableChromaProjection>(
+            let (_response, update_color) = color_slider_2d::<PolarTransform, StableChromaProjection>(
                 ui,
                 &mut coord,
                 projection,
@@ -1573,7 +1641,7 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
                 .data(|d| d.get_temp::<StableChromaPicker>(picker_id))
                 .unwrap();
 
-            picker.nearest_valid_color(coord)
+            (picker.nearest_valid_color(coord), update_color)
         }
 
         OKLabPlotType::StableLightness => {
@@ -1584,12 +1652,13 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
                 radius: state.c,
             };
 
-            let _response = color_slider_2d::<PolarTransform, StableLightnessProjection>(
-                ui,
-                &mut coord,
-                projection,
-                "StableLightnessColorPicker",
-            );
+            let (_response, update_color) =
+                color_slider_2d::<PolarTransform, StableLightnessProjection>(
+                    ui,
+                    &mut coord,
+                    projection,
+                    "StableLightnessColorPicker",
+                );
 
             state.h = coord.angle / std::f32::consts::TAU;
             state.c = coord.radius;
@@ -1600,11 +1669,13 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
                 .data(|d| d.get_temp::<StableLightnessPicker>(picker_id))
                 .unwrap();
 
-            picker.nearest_valid_color(coord)
+            (picker.nearest_valid_color(coord), update_color)
         }
     };
-    // show_srgba_unmultiplied(ui, new_color.to_array(), current_color_size)
-    //     .on_hover_text("Selected color");
+
+    if update_color {
+        *lch = color32_to_oklch(new_color);
+    }
 
     // --- Lightness slider (0..1) ---
     ui.horizontal(|ui| {
