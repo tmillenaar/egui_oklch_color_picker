@@ -53,7 +53,7 @@ where
         let mut picker = Self {
             size,
 
-            viewport: [-1.0, -1.0, 1.0, 1.0],
+            viewport: P::default_viewport(),
 
             stable_value_bits: 0,
 
@@ -89,7 +89,7 @@ where
     pub fn pixel_to_world(&self, pixel: Pos2) -> Pos2 {
         // Normalize to [0, 1]
         let nx = pixel.x / self.size.x;
-        let ny = pixel.y / self.size.y;
+        let ny = 1.0 - pixel.y / self.size.y;
 
         // Interpolate into the viewport
         Pos2 {
@@ -106,7 +106,7 @@ where
 
         Pos2 {
             x: nx * self.size.x,
-            y: ny * self.size.y,
+            y: (1.0 - ny) * self.size.y,
         }
     }
 

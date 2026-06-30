@@ -47,7 +47,7 @@ impl CoordinateTransform for PolarTransform {
     fn world_to_coord(world: Pos2) -> PolarCoord {
         let radius = (world.x * world.x + world.y * world.y).sqrt();
 
-        let mut angle = (-world.y).atan2(world.x);
+        let mut angle = (world.y).atan2(world.x);
 
         if angle < 0.0 {
             angle += std::f32::consts::TAU;
@@ -59,7 +59,7 @@ impl CoordinateTransform for PolarTransform {
     fn coord_to_world(coord: PolarCoord) -> Pos2 {
         Pos2 {
             x: coord.radius * coord.angle.cos(),
-            y: -coord.radius * coord.angle.sin(),
+            y: coord.radius * coord.angle.sin(),
         }
     }
 }
