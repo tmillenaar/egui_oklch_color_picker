@@ -53,7 +53,7 @@ where
         let mut picker = Self {
             size,
 
-            viewport: P::default_viewport(),
+            viewport: T::default_viewport(),
 
             stable_value_bits: 0,
 
@@ -187,6 +187,86 @@ where
         self.texture.set(image, egui::TextureOptions::LINEAR);
     }
 
+    pub fn update_viewport(&mut self, response: &Response, rect: Rect) -> bool {
+        let width = self.viewport[2] - self.viewport[0];
+        let height = self.viewport[3] - self.viewport[1];
+
+        let mut viewport_changed = false;
+
+        //
+        // Pan
+        //
+        let is_pan_button_down = response.ctx.input(|i| {
+            i.pointer.button_down(PointerButton::Secondary)
+                || i.pointer.button_down(PointerButton::Middle)
+        });
+
+        if is_pan_button_down && response.dragged() {
+            viewport_changed = true;
+
+            let drag = response.drag_delta();
+
+            let dx_world = drag.x / rect.width() * width;
+            let dy_world = drag.y / rect.height() * height;
+
+            // World space has +Y upwards.
+            self.viewport[0] -= dx_world;
+            self.viewport[2] -= dx_world;
+
+            self.viewport[1] += dy_world;
+            self.viewport[3] += dy_world;
+        }
+
+        //
+        // Zoom
+        //
+        let scroll = response.ctx.input(|i| i.raw_scroll_delta.y);
+
+        if scroll.abs() > 0.0 {
+            if let Some(mouse) = response.hover_pos() {
+                let local = Pos2 {
+                    x: mouse.x - rect.left(),
+                    y: mouse.y - rect.top(),
+                };
+
+                let world = self.pixel_to_world(local);
+
+                let zoom_factor = if scroll > 0.0 { 0.9 } else { 1.1 };
+
+                const MAX_ZOOM_FACTOR: f32 = 7.0;
+
+                let world_width = T::default_viewport()[2] - T::default_viewport()[0];
+                let world_height = T::default_viewport()[3] - T::default_viewport()[1];
+
+                let min_width = world_width / MAX_ZOOM_FACTOR;
+                let min_height = world_height / MAX_ZOOM_FACTOR;
+
+                let new_width = width * zoom_factor;
+                let new_height = height * zoom_factor;
+
+                if scroll > 0.0 && (new_width < min_width || new_height < min_height) {
+                    return viewport_changed;
+                }
+
+                viewport_changed = true;
+
+                self.viewport[0] = world.x + (self.viewport[0] - world.x) * zoom_factor;
+
+                self.viewport[2] = world.x + (self.viewport[2] - world.x) * zoom_factor;
+
+                self.viewport[1] = world.y + (self.viewport[1] - world.y) * zoom_factor;
+
+                self.viewport[3] = world.y + (self.viewport[3] - world.y) * zoom_factor;
+            }
+        }
+
+        if viewport_changed {
+            T::clamp_viewport(&mut self.viewport);
+        }
+
+        viewport_changed
+    }
+
     pub fn calculate_border_from_pixels(size: Vec2, pixels: &[u8]) -> Vec<Pos2> {
         let width = size.x as usize;
         let height = size.y as usize;
@@ -276,62 +356,62 @@ where
         self.projection.color_at(border_coord).color
     }
 
-    pub fn update_viewport_bounds(
-        response: &Response,
-        rect: Rect,
-        viewport: &mut [f32; 4],
-    ) -> bool {
-        let mut changed = false;
+    // pub fn update_viewport_bounds(
+    //     response: &Response,
+    //     rect: Rect,
+    //     viewport: &mut [f32; 4],
+    // ) -> bool {
+    //     let mut changed = false;
 
-        response.ctx.input(|i| {
-            if response.hovered() {
-                // -----------------------------
-                // Zoom
-                // -----------------------------
-                let zoom = i.zoom_delta();
+    //     response.ctx.input(|i| {
+    //         if response.hovered() {
+    //             // -----------------------------
+    //             // Zoom
+    //             // -----------------------------
+    //             let zoom = i.zoom_delta();
 
-                if zoom != 1.0 {
-                    if let Some(mouse) = i.pointer.hover_pos() {
-                        let nx = (mouse.x - rect.left()) / rect.width();
-                        let ny = (mouse.y - rect.top()) / rect.height();
+    //             if zoom != 1.0 {
+    //                 if let Some(mouse) = i.pointer.hover_pos() {
+    //                     let nx = (mouse.x - rect.left()) / rect.width();
+    //                     let ny = (mouse.y - rect.top()) / rect.height();
 
-                        let mouse_world_x = viewport[0] + nx * (viewport[2] - viewport[0]);
+    //                     let mouse_world_x = viewport[0] + nx * (viewport[2] - viewport[0]);
 
-                        let mouse_world_y = viewport[1] + ny * (viewport[3] - viewport[1]);
+    //                     let mouse_world_y = viewport[1] + ny * (viewport[3] - viewport[1]);
 
-                        viewport[0] = mouse_world_x - (mouse_world_x - viewport[0]) / zoom;
-                        viewport[2] = mouse_world_x + (viewport[2] - mouse_world_x) / zoom;
+    //                     viewport[0] = mouse_world_x - (mouse_world_x - viewport[0]) / zoom;
+    //                     viewport[2] = mouse_world_x + (viewport[2] - mouse_world_x) / zoom;
 
-                        viewport[1] = mouse_world_y - (mouse_world_y - viewport[1]) / zoom;
-                        viewport[3] = mouse_world_y + (viewport[3] - mouse_world_y) / zoom;
+    //                     viewport[1] = mouse_world_y - (mouse_world_y - viewport[1]) / zoom;
+    //                     viewport[3] = mouse_world_y + (viewport[3] - mouse_world_y) / zoom;
 
-                        changed = true;
-                    }
-                }
+    //                     changed = true;
+    //                 }
+    //             }
 
-                // -----------------------------
-                // Pan
-                // -----------------------------
-                if i.pointer.middle_down() {
-                    let delta = i.pointer.delta();
+    //             // -----------------------------
+    //             // Pan
+    //             // -----------------------------
+    //             if i.pointer.middle_down() {
+    //                 let delta = i.pointer.delta();
 
-                    let dx = delta.x / rect.width() * (viewport[2] - viewport[0]);
+    //                 let dx = delta.x / rect.width() * (viewport[2] - viewport[0]);
 
-                    let dy = delta.y / rect.height() * (viewport[3] - viewport[1]);
+    //                 let dy = delta.y / rect.height() * (viewport[3] - viewport[1]);
 
-                    viewport[0] -= dx;
-                    viewport[2] -= dx;
+    //                 viewport[0] -= dx;
+    //                 viewport[2] -= dx;
 
-                    viewport[1] -= dy;
-                    viewport[3] -= dy;
+    //                 viewport[1] -= dy;
+    //                 viewport[3] -= dy;
 
-                    changed = true;
-                }
-            }
-        });
+    //                 changed = true;
+    //             }
+    //         }
+    //     });
 
-        changed
-    }
+    //     changed
+    // }
 }
 
 impl<T, P> Clone for CachedPicker<T, P>

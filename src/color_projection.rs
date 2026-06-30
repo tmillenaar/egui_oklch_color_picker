@@ -9,7 +9,6 @@ pub struct ColorSample {
 
 pub trait ColorProjection<C> {
     fn color_at(&self, coord: C) -> ColorSample;
-    fn default_viewport() -> [f32; 4];
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -24,9 +23,6 @@ impl ColorProjection<CartesianCoord> for StableHueProjection {
             c: coord.x * 0.325,
             h: self.hue,
         })
-    }
-    fn default_viewport() -> [f32; 4] {
-        [0., 0., 1., 1.]
     }
 }
 
@@ -43,9 +39,6 @@ impl ColorProjection<PolarCoord> for StableChromaProjection {
             h: coord.angle,
         })
     }
-    fn default_viewport() -> [f32; 4] {
-        [-1., -1., 1., 1.]
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -60,8 +53,5 @@ impl ColorProjection<PolarCoord> for StableLightnessProjection {
             c: coord.radius * 0.325,
             h: coord.angle,
         })
-    }
-    fn default_viewport() -> [f32; 4] {
-        [-1., -1., 1., 1.]
     }
 }
