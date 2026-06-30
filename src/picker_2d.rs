@@ -356,62 +356,30 @@ where
         self.projection.color_at(border_coord).color
     }
 
-    // pub fn update_viewport_bounds(
-    //     response: &Response,
-    //     rect: Rect,
-    //     viewport: &mut [f32; 4],
-    // ) -> bool {
-    //     let mut changed = false;
+    pub fn offscreen_indicator(&self, coord: T::Coord) -> Option<(Pos2, f32)> {
+        let marker = self.coord_to_pixel(coord);
 
-    //     response.ctx.input(|i| {
-    //         if response.hovered() {
-    //             // -----------------------------
-    //             // Zoom
-    //             // -----------------------------
-    //             let zoom = i.zoom_delta();
+        // Already visible.
+        if marker.x >= 0.0 && marker.x <= self.size.x && marker.y >= 0.0 && marker.y <= self.size.y
+        {
+            return None;
+        }
 
-    //             if zoom != 1.0 {
-    //                 if let Some(mouse) = i.pointer.hover_pos() {
-    //                     let nx = (mouse.x - rect.left()) / rect.width();
-    //                     let ny = (mouse.y - rect.top()) / rect.height();
+        // Clamp to the nearest point on the viewport boundary.
+        const MARGIN: f32 = 10.0;
+        let indicator = Pos2 {
+            x: marker.x.clamp(MARGIN, self.size.x - MARGIN),
+            y: marker.y.clamp(MARGIN, self.size.y - MARGIN),
+        };
 
-    //                     let mouse_world_x = viewport[0] + nx * (viewport[2] - viewport[0]);
+        // Direction from the indicator towards the hidden marker.
+        let dx = marker.x - indicator.x;
+        let dy = marker.y - indicator.y;
 
-    //                     let mouse_world_y = viewport[1] + ny * (viewport[3] - viewport[1]);
+        let angle = dy.atan2(dx);
 
-    //                     viewport[0] = mouse_world_x - (mouse_world_x - viewport[0]) / zoom;
-    //                     viewport[2] = mouse_world_x + (viewport[2] - mouse_world_x) / zoom;
-
-    //                     viewport[1] = mouse_world_y - (mouse_world_y - viewport[1]) / zoom;
-    //                     viewport[3] = mouse_world_y + (viewport[3] - mouse_world_y) / zoom;
-
-    //                     changed = true;
-    //                 }
-    //             }
-
-    //             // -----------------------------
-    //             // Pan
-    //             // -----------------------------
-    //             if i.pointer.middle_down() {
-    //                 let delta = i.pointer.delta();
-
-    //                 let dx = delta.x / rect.width() * (viewport[2] - viewport[0]);
-
-    //                 let dy = delta.y / rect.height() * (viewport[3] - viewport[1]);
-
-    //                 viewport[0] -= dx;
-    //                 viewport[2] -= dx;
-
-    //                 viewport[1] -= dy;
-    //                 viewport[3] -= dy;
-
-    //                 changed = true;
-    //             }
-    //         }
-    //     });
-
-    //     changed
-    // }
+        Some((indicator, angle))
+    }
 }
 
 impl<T, P> Clone for CachedPicker<T, P>

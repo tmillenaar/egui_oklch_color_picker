@@ -532,6 +532,20 @@ where
                 );
             }
         }
+        // Draw arrow pointing to marker if outside of viewport
+        if let Some((pos, angle)) = picker.offscreen_indicator(*coord) {
+            draw_triangle(
+                &painter,
+                pos + rect.min.to_vec2(),
+                angle,
+                8.0,
+                Color32::WHITE,
+                Stroke {
+                    width: 0.5,
+                    color: Color32::BLACK,
+                },
+            );
+        }
     }
 
     if response.is_pointer_button_down_on() {
@@ -598,6 +612,31 @@ pub fn draw_inward_triangles(
 
         painter.add(Shape::convex_polygon(vec![tip, left, right], fill, stroke));
     }
+}
+
+pub fn draw_triangle(
+    painter: &Painter,
+    tip: Pos2,
+    angle: f32, // radians, 0 = +X
+    size: f32,  // side length of equilateral triangle
+    fill: Color32,
+    stroke: Stroke,
+) {
+    let height = size * (3.0_f32).sqrt() * 0.5;
+
+    // Direction the triangle points.
+    let dir = Vec2::new(angle.cos(), angle.sin());
+
+    // Perpendicular to the direction.
+    let perp = Vec2::new(-dir.y, dir.x);
+
+    // Base is behind the tip.
+    let base_center = tip - dir * height;
+
+    let left = base_center + perp * (size * 0.5);
+    let right = base_center - perp * (size * 0.5);
+
+    painter.add(Shape::convex_polygon(vec![tip, left, right], fill, stroke));
 }
 
 #[derive(Clone)]
