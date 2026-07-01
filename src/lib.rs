@@ -714,7 +714,7 @@ pub fn numeric_field(
             ui.label(prefix);
 
             egui::TextEdit::singleline(&mut state.text)
-                .desired_width(40.0)
+                .desired_width(25.0)
                 .id(id)
                 .show(ui)
         })
@@ -827,6 +827,14 @@ impl<'a> RgbEdit<'a> {
             changed |= self.edit_component(ui, "R", 0);
             changed |= self.edit_component(ui, "G", 1);
             changed |= self.edit_component(ui, "B", 2);
+            if ui
+                .button("📋")
+                .on_hover_text("Click to copy RGB values")
+                .clicked()
+            {
+                ui.ctx()
+                    .copy_text(format!("{}, {}, {}", self.rgb[0], self.rgb[1], self.rgb[2]));
+            }
         });
 
         changed
@@ -933,7 +941,6 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
         let mut b = color.b();
         let mut a = color.a();
         let mut rgb = [r, g, b];
-        // let mut rgba = [r, g, b, a];
 
         if RgbEdit::new(&mut rgb).ui(ui) {
             let new_color = Color32::from_rgba_unmultiplied(
