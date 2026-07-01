@@ -175,3 +175,71 @@ pub fn color32_to_oklch(color: crate::Color32) -> Oklch {
     let lab = linear_srgb_to_oklab(linear);
     oklab_to_oklch(lab)
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
+pub struct Hsv {
+    pub h: f32, // 0..360
+    pub s: f32, // 0..100
+    pub v: f32, // 0..100
+}
+
+pub fn color32_to_hsv(color: crate::Color32) -> Hsv {
+    let [r, g, b, _] = color.to_array();
+
+    let r = r as f32 / 255.0;
+    let g = g as f32 / 255.0;
+    let b = b as f32 / 255.0;
+
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+
+    let mut h = if delta == 0.0 {
+        0.0
+    } else if max == r {
+        ((g - b) / delta).rem_euclid(6.0)
+    } else if max == g {
+        (b - r) / delta + 2.0
+    } else {
+        (r - g) / delta + 4.0
+    };
+
+    h *= 60.0;
+
+    let s = if max == 0.0 {
+        0.0
+    } else {
+        delta / max
+    };
+
+    Hsv {
+        h: h,
+        s: s * 100.0,
+        v: max * 100.0,
+    }
+}
+
+pub fn hsv_to_color32(hsv: Hsv) -> crate::Color32 {
+    let h = hsv.h.rem_euclid(360.0);
+    let s = hsv.s / 100.0;
+    let v = hsv.v / 100.0;
+
+    let c = v * s;
+    let x = c * (1.0 - (((h / 60.0) % 2.0) - 1.0).abs());
+    let m = v - c;
+
+    let (r, g, b) = match h {
+        h if h < 60.0 => (c, x, 0.0),
+        h if h < 120.0 => (x, c, 0.0),
+        h if h < 180.0 => (0.0, c, x),
+        h if h < 240.0 => (0.0, x, c),
+        h if h < 300.0 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+
+    crate::Color32::from_rgb(
+        ((r + m) * 255.0).round() as u8,
+        ((g + m) * 255.0).round() as u8,
+        ((b + m) * 255.0).round() as u8,
+    )
+}

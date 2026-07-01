@@ -12,6 +12,7 @@ use crate::conversions::*;
 use crate::coordinate_transforms::*;
 use crate::picker_2d::*;
 use crate::text_fields::rgb_text_fields::*;
+use crate::text_fields::hsv_text_fields::*;
 
 use std::f32;
 use std::sync::Arc;
@@ -734,14 +735,16 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
         }
     });
 
-    ui.horizontal(|ui| {
-        let color = color_sample.color;
+    let color = color_sample.color;
 
-        let mut r = color.r();
-        let mut g = color.g();
-        let mut b = color.b();
-        let mut a = color.a();
-        let mut rgb = [r, g, b];
+    let mut r = color.r();
+    let mut g = color.g();
+    let mut b = color.b();
+    let mut a = color.a();
+    let mut rgb = [r, g, b];
+
+    // RGB text fields
+    ui.horizontal(|ui| {
 
         if RgbEdit::new(&mut rgb).ui(ui) {
             let new_color = Color32::from_rgba_unmultiplied(
@@ -757,33 +760,26 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
             state.c = lch.c / 0.325;
             state.h = lch.h / std::f32::consts::TAU;
         }
+    });
 
-
-
-        // ui.horizontal(|ui| {
-        //     if ui
-        //         .button("📋")
-        //         .on_hover_text("Click to copy color values")
-        //         .clicked()
-        //     {
-        //         ui.ctx()
-        //             .copy_text(format!("{}, {}, {}", color.r(), color.g(), color.b()));
-        //     }
-        //     edit_color_field(ui, "R", &mut r, &mut rgba, 0, false);
-        //     edit_color_field(ui, "G", &mut g, &mut rgba, 1, false);
-        //     edit_color_field(ui, "B", &mut b, &mut rgba, 2, false);
-
-        // });
-
-        // let new_color = Color32::from_rgba_unmultiplied(r, g, b, a);
-        // if new_color != color {
-        //     update_color = true;
-        //     color_sample.color = new_color;
-        //     *lch = color32_to_oklch(color_sample.color);
-        //     state.l = lch.l;
-        //     state.c = lch.c / 0.325;
-        //     state.h = lch.h / std::f32::consts::TAU;
-        // }
+    // HSV text fields
+    ui.horizontal(|ui| {
+        let mut hsv = color32_to_hsv(color);
+        if HsvEdit::new(&mut hsv).ui(ui) {
+            let rgba = hsv_to_color32(hsv).to_array();
+            let new_color = Color32::from_rgba_unmultiplied(
+                rgba[0],
+                rgba[1],
+                rgba[2],
+                a
+            );
+            update_color = true;
+            color_sample.color = new_color;
+            *lch = color32_to_oklch(color_sample.color);
+            state.l = lch.l;
+            state.c = lch.c / 0.325;
+            state.h = lch.h / std::f32::consts::TAU;
+        }
     });
 
     ui.data_mut(|d| {
