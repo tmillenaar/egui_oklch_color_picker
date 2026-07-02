@@ -12,6 +12,7 @@ use crate::color_projection::*;
 use crate::conversions::*;
 use crate::coordinate_transforms::*;
 use crate::picker_2d::*;
+use crate::text_fields::hex_text_field::*;
 use crate::text_fields::hsv_text_fields::*;
 use crate::text_fields::oklab_text_fields::*;
 use crate::text_fields::oklch_text_fields::*;
@@ -750,6 +751,20 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
     let mut b = color.b();
     let mut a = color.a();
     let mut rgb = [r, g, b];
+
+    // Hex text field
+    ui.horizontal(|ui| {
+        if HexEdit::new(&mut rgb).ui(ui, COLOR_SLIDER_WIDTH + 50.0) {
+            let new_color = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], a);
+
+            update_color = true;
+            color_sample.color = new_color;
+            *lch = color32_to_oklch(color_sample.color);
+            state.l = lch.l;
+            state.c = lch.c / 0.325;
+            state.h = lch.h / std::f32::consts::TAU;
+        }
+    });
 
     // RGB text fields
     ui.horizontal(|ui| {

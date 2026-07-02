@@ -1,5 +1,5 @@
 use crate::conversions::*;
-use crate::text_fields::numeric_field::*;
+use crate::text_fields::editable_text_field::*;
 use crate::ui_extras::copy_icon::*;
 
 use egui::*;
@@ -75,7 +75,7 @@ impl<'a> OklchEdit<'a> {
     }
 
     fn edit_component(&mut self, ui: &mut Ui, label: &str, index: usize) -> bool {
-        let id = ui.id().with(label);
+        let id = ui.id().with(("Oklch", label));
 
         let text = match index {
             0 => format!("{:.3}", self.oklch.l.clone()),
@@ -91,7 +91,7 @@ impl<'a> OklchEdit<'a> {
             _ => unreachable!("Oklch does not have a 4th component"),
         };
 
-        let (_, edit) = numeric_field(ui, id, label, text);
+        let (_, edit) = editable_text_field(ui, id, label, text, 38.);
 
         match edit {
             NumericEdit::None | NumericEdit::Cancel => false,

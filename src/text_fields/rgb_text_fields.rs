@@ -1,4 +1,4 @@
-use crate::text_fields::numeric_field::*;
+use crate::text_fields::editable_text_field::*;
 use crate::ui_extras::copy_icon::*;
 use egui::*;
 
@@ -88,9 +88,9 @@ impl<'a> RgbEdit<'a> {
     }
 
     fn edit_component(&mut self, ui: &mut Ui, label: &str, index: usize) -> bool {
-        let id = ui.id().with(label);
+        let id = ui.id().with(("RGB", label));
 
-        let (_, edit) = numeric_field(ui, id, label, self.rgb[index].to_string());
+        let (_, edit) = editable_text_field(ui, id, label, self.rgb[index].to_string(), 38.);
 
         match edit {
             NumericEdit::None | NumericEdit::Cancel => false,

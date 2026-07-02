@@ -12,7 +12,13 @@ struct NumericFieldState {
     select_all_next_frame: bool,
 }
 
-pub fn numeric_field(ui: &mut Ui, id: Id, prefix: &str, value: String) -> (Response, NumericEdit) {
+pub fn editable_text_field(
+    ui: &mut Ui,
+    id: Id,
+    prefix: &str,
+    value: String,
+    width: f32,
+) -> (Response, NumericEdit) {
     let mut state = ui
         .data(|d| d.get_temp::<NumericFieldState>(id))
         .unwrap_or_else(|| NumericFieldState {
@@ -35,7 +41,7 @@ pub fn numeric_field(ui: &mut Ui, id: Id, prefix: &str, value: String) -> (Respo
             ui.label(prefix);
 
             egui::TextEdit::singleline(&mut state.text)
-                .desired_width(38.0)
+                .desired_width(width)
                 .id(id)
                 .show(ui)
         })
