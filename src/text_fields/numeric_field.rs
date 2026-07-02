@@ -12,12 +12,7 @@ struct NumericFieldState {
     select_all_next_frame: bool,
 }
 
-pub fn numeric_field(
-    ui: &mut Ui,
-    id: Id,
-    prefix: &str,
-    value: String,
-) -> (Response, NumericEdit) {
+pub fn numeric_field(ui: &mut Ui, id: Id, prefix: &str, value: String) -> (Response, NumericEdit) {
     let mut state = ui
         .data(|d| d.get_temp::<NumericFieldState>(id))
         .unwrap_or_else(|| NumericFieldState {
@@ -40,7 +35,7 @@ pub fn numeric_field(
             ui.label(prefix);
 
             egui::TextEdit::singleline(&mut state.text)
-                .desired_width(25.0)
+                .desired_width(38.0)
                 .id(id)
                 .show(ui)
         })
@@ -52,12 +47,10 @@ pub fn numeric_field(
     if select_all {
         use egui::text::{CCursor, CCursorRange};
 
-        output.state.cursor.set_char_range(Some(
-            CCursorRange::two(
-                CCursor::new(0),
-                CCursor::new(state.text.chars().count()),
-            ),
-        ));
+        output.state.cursor.set_char_range(Some(CCursorRange::two(
+            CCursor::new(0),
+            CCursor::new(state.text.chars().count()),
+        )));
 
         output.state.store(ui.ctx(), response.id);
     }
@@ -68,9 +61,7 @@ pub fn numeric_field(
     }
 
     let pasted = response.has_focus()
-        && ui.input(|i| {
-            i.events.iter().any(|e| matches!(e, egui::Event::Paste(_)))
-        });
+        && ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Paste(_))));
     let enter = response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
     let escape = ui.input(|i| i.key_pressed(Key::Escape));
 

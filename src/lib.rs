@@ -6,26 +6,31 @@ mod conversions;
 mod coordinate_transforms;
 mod picker_2d;
 mod text_fields;
+mod ui_extras;
 
 use crate::color_projection::*;
 use crate::conversions::*;
 use crate::coordinate_transforms::*;
 use crate::picker_2d::*;
-use crate::text_fields::rgb_text_fields::*;
 use crate::text_fields::hsv_text_fields::*;
+use crate::text_fields::oklab_text_fields::*;
+use crate::text_fields::oklch_text_fields::*;
+use crate::text_fields::rgb_text_fields::*;
 
 use std::f32;
 use std::sync::Arc;
 
-use egui::*;
 use egui::Order::Background;
 use egui::epaint::RectShape;
+use egui::*;
 use egui::{cache::*, viewport};
 use epaint::{
     Mesh, Rect, Shape, Stroke, StrokeKind, Vec2,
     ecolor::{Color32, Hsva, HsvaGamma, Rgba},
     pos2, vec2,
 };
+
+const COLOR_SLIDER_WIDTH: f32 = 275.0;
 
 fn contrast_color(color: impl Into<Rgba>) -> Color32 {
     if color.into().intensity() < 0.5 {
@@ -727,7 +732,10 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
             tab_switched = true;
         }
         if ui
-            .selectable_label(matches!(tab, OKLabPlotType::StableLightness), "Stable Lightness")
+            .selectable_label(
+                matches!(tab, OKLabPlotType::StableLightness),
+                "Stable Lightness",
+            )
             .clicked()
         {
             tab = OKLabPlotType::StableLightness;
@@ -745,14 +753,8 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
 
     // RGB text fields
     ui.horizontal(|ui| {
-
-        if RgbEdit::new(&mut rgb).ui(ui) {
-            let new_color = Color32::from_rgba_unmultiplied(
-                rgb[0],
-                rgb[1],
-                rgb[2],
-                a
-            );
+        if RgbEdit::new(&mut rgb).ui(ui, COLOR_SLIDER_WIDTH + 50.) {
+            let new_color = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], a);
             update_color = true;
             color_sample.color = new_color;
             *lch = color32_to_oklch(color_sample.color);
@@ -765,17 +767,62 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
     // HSV text fields
     ui.horizontal(|ui| {
         let mut hsv = color32_to_hsv(color);
-        if HsvEdit::new(&mut hsv).ui(ui) {
+        if HsvEdit::new(&mut hsv).ui(ui, COLOR_SLIDER_WIDTH + 50.) {
             let rgba = hsv_to_color32(hsv).to_array();
-            let new_color = Color32::from_rgba_unmultiplied(
-                rgba[0],
-                rgba[1],
-                rgba[2],
-                a
-            );
+            let new_color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], a);
             update_color = true;
             color_sample.color = new_color;
             *lch = color32_to_oklch(color_sample.color);
+            state.l = lch.l;
+            state.c = lch.c / 0.325;
+            state.h = lch.h / std::f32::consts::TAU;
+        }
+    });
+
+    // Oklab text fields
+    ui.horizontal(|ui| {
+        let mut lab = oklch_to_oklab(*lch);
+
+        if OklabEdit::new(&mut lab).ui(ui, COLOR_SLIDER_WIDTH + 50.) {
+            let (_, linear) = oklab_to_linear_srgb(lab);
+            let srgb = linear_srgb_to_srgb(linear);
+
+            let new_color = Color32::from_rgba_unmultiplied(
+                (srgb.r * 255.0).round() as u8,
+                (srgb.g * 255.0).round() as u8,
+                (srgb.b * 255.0).round() as u8,
+                a,
+            );
+
+            update_color = true;
+            color_sample.color = new_color;
+            *lch = oklab_to_oklch(lab);
+
+            state.l = lch.l;
+            state.c = lch.c / 0.325;
+            state.h = lch.h / std::f32::consts::TAU;
+        }
+    });
+
+    // Oklch text fields
+    ui.horizontal(|ui| {
+        let mut oklch = *lch;
+
+        if OklchEdit::new(&mut oklch).ui(ui, COLOR_SLIDER_WIDTH + 50.) {
+            let (_, linear) = oklab_to_linear_srgb(oklch_to_oklab(oklch));
+            let srgb = linear_srgb_to_srgb(linear);
+
+            let new_color = Color32::from_rgba_unmultiplied(
+                (srgb.r * 255.0).round() as u8,
+                (srgb.g * 255.0).round() as u8,
+                (srgb.b * 255.0).round() as u8,
+                a,
+            );
+
+            update_color = true;
+            color_sample.color = new_color;
+            *lch = oklch;
+
             state.l = lch.l;
             state.c = lch.c / 0.325;
             state.h = lch.h / std::f32::consts::TAU;
@@ -886,7 +933,6 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
         color_sample.color = new_color_;
         *lch = color32_to_oklch(new_color_);
     }
-
 
     // --- Lightness slider (0..1) ---
     ui.horizontal(|ui| {
@@ -1066,7 +1112,6 @@ pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Color32) -> Response {
         button_response = button_response.on_hover_text("Click to edit color");
     }
 
-    const COLOR_SLIDER_WIDTH: f32 = 275.0;
     Popup::menu(&button_response)
         .id(popup_id)
         .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
