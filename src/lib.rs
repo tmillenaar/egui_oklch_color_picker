@@ -135,7 +135,7 @@ fn color_button(ui: &mut Ui, srgba: [u8; 4], open: bool) -> Response {
     response
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct OklchUiState {
     // normalized 0..1
     l: f32,
@@ -432,6 +432,8 @@ where
     T::Coord: Clone + Copy + PartialEq,
     P: ColorProjection<T::Coord> + Clone + PartialEq + Send + Sync + 'static,
 {
+    let mut color_changed = false;
+
     let desired_size = Vec2::splat(ui.spacing().slider_width);
 
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
@@ -570,6 +572,7 @@ where
             };
 
             *coord = picker.pixel_to_coord(local);
+            color_changed = true;
         }
     }
 
@@ -577,7 +580,8 @@ where
         d.insert_temp(picker_id, picker);
     });
 
-    (response, viewport_contains_picked_color || color_is_valid)
+    // (response, viewport_contains_picked_color || color_is_valid)
+    (response, color_changed)
 }
 
 pub fn draw_inward_triangles(
@@ -946,8 +950,12 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
     if update_color_ {
         update_color = true;
         color_sample.color = new_color_;
-        *lch = color32_to_oklch(new_color_);
     }
+    if update_color {
+        *lch = color32_to_oklch(color_sample.color);
+    }
+
+    let original_state = state.clone();
 
     // --- Lightness slider (0..1) ---
     ui.horizontal(|ui| {
@@ -1039,11 +1047,21 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
         state.h = hue_val / 360.;
     });
 
+    // TODO: Add alpha slider?
+
+    if state != original_state {
+        update_color = true;
+        color_sample.color = oklch_to_color32(Oklch {
+            l: state.l,
+            c: state.c * 0.325,
+            h: state.h * std::f32::consts::TAU,
+        })
+        .color
+    }
+
     ui.data_mut(|d| {
         d.insert_temp(state_id, state);
     });
-
-    // TODO: Add alpha slider?
 
     (update_color, color_sample.color)
 }
