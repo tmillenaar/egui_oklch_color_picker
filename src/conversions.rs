@@ -136,44 +136,12 @@ pub fn oklch_to_oklab(c: Oklch) -> Oklab {
     }
 }
 
-// pub fn try_oklch_to_linear_srgb(c: Oklch, clamp: bool) -> Option<LinearSrgb> {
-//     let rgb = oklab_to_linear_srgb(oklch_to_oklab(c));
-
-//     if !(0.0..=1.0).contains(&rgb.r)
-//         || !(0.0..=1.0).contains(&rgb.g)
-//         || !(0.0..=1.0).contains(&rgb.b)
-//     {
-//         None
-//     } else {
-//         Some(rgb)
-//     }
-// }
-
 pub fn oklch_to_color32(c: Oklch) -> ColorSample {
-    let (is_valid, linear) = oklab_to_linear_srgb(oklch_to_oklab(c));
-
-    let srgb = linear_srgb_to_srgb(linear);
-
-    let color = crate::Color32::from_rgb(
-        (srgb.r * 255.0) as u8,
-        (srgb.g * 255.0) as u8,
-        (srgb.b * 255.0) as u8,
-    );
-    ColorSample {
-        valid: is_valid,
-        color,
-    }
+    oklab_to_color32(oklch_to_oklab(c))
 }
 
 pub fn color32_to_oklch(color: crate::Color32) -> Oklch {
-    let [r, g, b, a] = color.to_array();
-    let linear = srgb_to_linear_srgb(Srgb {
-        r: r as f32 / 255.,
-        g: g as f32 / 255.,
-        b: b as f32 / 255.,
-    });
-    let lab = linear_srgb_to_oklab(linear);
-    oklab_to_oklch(lab)
+    oklab_to_oklch(color32_to_oklab(color))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
@@ -206,11 +174,7 @@ pub fn color32_to_hsv(color: crate::Color32) -> Hsv {
 
     h *= 60.0;
 
-    let s = if max == 0.0 {
-        0.0
-    } else {
-        delta / max
-    };
+    let s = if max == 0.0 { 0.0 } else { delta / max };
 
     Hsv {
         h: h,
@@ -242,4 +206,31 @@ pub fn hsv_to_color32(hsv: Hsv) -> crate::Color32 {
         ((g + m) * 255.0).round() as u8,
         ((b + m) * 255.0).round() as u8,
     )
+}
+
+pub fn color32_to_oklab(color: crate::Color32) -> Oklab {
+    let [r, g, b, _] = color.to_array();
+
+    linear_srgb_to_oklab(srgb_to_linear_srgb(Srgb {
+        r: r as f32 / 255.0,
+        g: g as f32 / 255.0,
+        b: b as f32 / 255.0,
+    }))
+}
+
+pub fn oklab_to_color32(c: Oklab) -> ColorSample {
+    let (is_valid, linear) = oklab_to_linear_srgb(c);
+
+    let srgb = linear_srgb_to_srgb(linear);
+
+    let color = crate::Color32::from_rgb(
+        (srgb.r * 255.0) as u8,
+        (srgb.g * 255.0) as u8,
+        (srgb.b * 255.0) as u8,
+    );
+
+    ColorSample {
+        valid: is_valid,
+        color,
+    }
 }

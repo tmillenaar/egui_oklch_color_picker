@@ -434,7 +434,7 @@ where
 {
     let mut color_changed = false;
 
-    let desired_size = Vec2::splat(ui.spacing().slider_width);
+    let desired_size = Vec2::splat(ui.spacing().slider_width + 34.);
 
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 
@@ -694,378 +694,6 @@ enum OKLabPlotType {
     StableHue,
 }
 
-fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool, Color32) {
-    let current_color_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
-
-    let state_id = ui.id().with("oklch_ui_state");
-
-    // Todo: base default on color value
-    // Todo: If the color changed beneath us, reset state to match new color
-    let mut state: OklchUiState =
-        ui.data(|d| d.get_temp::<OklchUiState>(state_id))
-            .unwrap_or(OklchUiState {
-                l: 0.5,
-                c: 0.5,
-                h: 0.5,
-            });
-
-    let l = state.l;
-    let c = state.c * 0.325;
-    let h = state.h * std::f32::consts::TAU;
-
-    let mut color_sample = oklch_to_color32(lch.clone()); // technically the color from previous frame, but I want to display this above the 2d picker
-    let mut update_color = false;
-
-    let mut tab = ui.data(|d| {
-        d.get_temp::<OKLabPlotType>(ui.id())
-            .unwrap_or(OKLabPlotType::StableHue)
-    });
-    let mut tab_switched = false;
-    ui.horizontal(|ui| {
-        if ui
-            .selectable_label(matches!(tab, OKLabPlotType::StableHue), "Stable Hue")
-            .clicked()
-        {
-            tab = OKLabPlotType::StableHue;
-            tab_switched = true;
-        }
-        if ui
-            .selectable_label(matches!(tab, OKLabPlotType::StableChroma), "Stable Chroma")
-            .clicked()
-        {
-            tab = OKLabPlotType::StableChroma;
-            tab_switched = true;
-        }
-        if ui
-            .selectable_label(
-                matches!(tab, OKLabPlotType::StableLightness),
-                "Stable Lightness",
-            )
-            .clicked()
-        {
-            tab = OKLabPlotType::StableLightness;
-            tab_switched = true;
-        }
-    });
-
-    let color = color_sample.color;
-
-    let mut r = color.r();
-    let mut g = color.g();
-    let mut b = color.b();
-    let mut a = color.a();
-    let mut rgb = [r, g, b];
-
-    // Hex text field
-    ui.horizontal(|ui| {
-        if HexEdit::new(&mut rgb).ui(ui, COLOR_SLIDER_WIDTH + 50.0) {
-            let new_color = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], a);
-
-            update_color = true;
-            color_sample.color = new_color;
-            *lch = color32_to_oklch(color_sample.color);
-            state.l = lch.l;
-            state.c = lch.c / 0.325;
-            state.h = lch.h / std::f32::consts::TAU;
-        }
-    });
-
-    // RGB text fields
-    ui.horizontal(|ui| {
-        if RgbEdit::new(&mut rgb).ui(ui, COLOR_SLIDER_WIDTH + 50.) {
-            let new_color = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], a);
-            update_color = true;
-            color_sample.color = new_color;
-            *lch = color32_to_oklch(color_sample.color);
-            state.l = lch.l;
-            state.c = lch.c / 0.325;
-            state.h = lch.h / std::f32::consts::TAU;
-        }
-    });
-
-    // HSV text fields
-    ui.horizontal(|ui| {
-        let mut hsv = color32_to_hsv(color);
-        if HsvEdit::new(&mut hsv).ui(ui, COLOR_SLIDER_WIDTH + 50.) {
-            let rgba = hsv_to_color32(hsv).to_array();
-            let new_color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], a);
-            update_color = true;
-            color_sample.color = new_color;
-            *lch = color32_to_oklch(color_sample.color);
-            state.l = lch.l;
-            state.c = lch.c / 0.325;
-            state.h = lch.h / std::f32::consts::TAU;
-        }
-    });
-
-    // Oklab text fields
-    ui.horizontal(|ui| {
-        let mut lab = oklch_to_oklab(*lch);
-
-        if OklabEdit::new(&mut lab).ui(ui, COLOR_SLIDER_WIDTH + 50.) {
-            let (_, linear) = oklab_to_linear_srgb(lab);
-            let srgb = linear_srgb_to_srgb(linear);
-
-            let new_color = Color32::from_rgba_unmultiplied(
-                (srgb.r * 255.0).round() as u8,
-                (srgb.g * 255.0).round() as u8,
-                (srgb.b * 255.0).round() as u8,
-                a,
-            );
-
-            update_color = true;
-            color_sample.color = new_color;
-            *lch = oklab_to_oklch(lab);
-
-            state.l = lch.l;
-            state.c = lch.c / 0.325;
-            state.h = lch.h / std::f32::consts::TAU;
-        }
-    });
-
-    // Oklch text fields
-    ui.horizontal(|ui| {
-        let mut oklch = *lch;
-
-        if OklchEdit::new(&mut oklch).ui(ui, COLOR_SLIDER_WIDTH + 50.) {
-            let (_, linear) = oklab_to_linear_srgb(oklch_to_oklab(oklch));
-            let srgb = linear_srgb_to_srgb(linear);
-
-            let new_color = Color32::from_rgba_unmultiplied(
-                (srgb.r * 255.0).round() as u8,
-                (srgb.g * 255.0).round() as u8,
-                (srgb.b * 255.0).round() as u8,
-                a,
-            );
-
-            update_color = true;
-            color_sample.color = new_color;
-            *lch = oklch;
-
-            state.l = lch.l;
-            state.c = lch.c / 0.325;
-            state.h = lch.h / std::f32::consts::TAU;
-        }
-    });
-
-    ui.data_mut(|d| {
-        d.insert_temp(ui.id(), tab.clone());
-    });
-
-    if tab_switched {
-        state.l = lch.l;
-        state.c = lch.c / 0.325;
-        state.h = lch.h / std::f32::consts::TAU;
-    }
-
-    show_srgba_unmultiplied(ui, color_sample.color.to_array(), current_color_size)
-        .on_hover_text("Selected color");
-
-    let (new_color_, update_color_) = match tab {
-        OKLabPlotType::StableHue => {
-            let projection = StableHueProjection {
-                hue: state.h * std::f32::consts::TAU,
-            };
-
-            let mut coord = CartesianCoord {
-                x: state.c,
-                y: state.l,
-            };
-
-            let (_response, update_color) = color_slider_2d::<
-                CartesianTransform,
-                StableHueProjection,
-            >(
-                ui, &mut coord, projection, "StableHueColorPicker"
-            );
-
-            state.c = coord.x;
-            state.l = coord.y;
-
-            let picker_id = ui.id().with("StableHueColorPicker");
-
-            let picker = ui
-                .data(|d| d.get_temp::<StableHuePicker>(picker_id))
-                .unwrap();
-
-            (picker.nearest_valid_color(coord), update_color)
-        }
-
-        OKLabPlotType::StableChroma => {
-            let projection = StableChromaProjection { chroma: state.c };
-
-            let mut coord = PolarCoord {
-                angle: state.h * std::f32::consts::TAU,
-                radius: 1.0 - state.l,
-            };
-
-            let (_response, update_color) = color_slider_2d::<PolarTransform, StableChromaProjection>(
-                ui,
-                &mut coord,
-                projection,
-                "StableChromaColorPicker",
-            );
-
-            state.h = coord.angle / std::f32::consts::TAU;
-            state.l = 1.0 - coord.radius;
-
-            let picker_id = ui.id().with("StableChromaColorPicker");
-
-            let picker = ui
-                .data(|d| d.get_temp::<StableChromaPicker>(picker_id))
-                .unwrap();
-
-            (picker.nearest_valid_color(coord), update_color)
-        }
-
-        OKLabPlotType::StableLightness => {
-            let projection = StableLightnessProjection { lightness: state.l };
-
-            let mut coord = PolarCoord {
-                angle: state.h * std::f32::consts::TAU,
-                radius: state.c,
-            };
-
-            let (_response, update_color) =
-                color_slider_2d::<PolarTransform, StableLightnessProjection>(
-                    ui,
-                    &mut coord,
-                    projection,
-                    "StableLightnessColorPicker",
-                );
-
-            state.h = coord.angle / std::f32::consts::TAU;
-            state.c = coord.radius;
-
-            let picker_id = ui.id().with("StableLightnessColorPicker");
-
-            let picker = ui
-                .data(|d| d.get_temp::<StableLightnessPicker>(picker_id))
-                .unwrap();
-
-            (picker.nearest_valid_color(coord), update_color)
-        }
-    };
-
-    if update_color_ {
-        update_color = true;
-        color_sample.color = new_color_;
-    }
-    if update_color {
-        *lch = color32_to_oklch(color_sample.color);
-    }
-
-    let original_state = state.clone();
-
-    // --- Lightness slider (0..1) ---
-    ui.horizontal(|ui| {
-        color_slider_1d_grid(
-            ui,
-            &mut state.l,
-            lch.l,
-            color_sample.color,
-            |l_mut| oklch_to_color32(Oklch { l: l_mut, c, h }),
-            None::<fn(f32) -> Color32>,
-            &"lightness",
-        )
-        .on_hover_text("Lightness");
-        DragValue::new(&mut state.l)
-            .prefix("L: ")
-            .speed(0.003)
-            .range(0.0..=1.0)
-            .custom_formatter(|n, _| format!("{n:.03}"))
-            .ui(ui)
-            .on_hover_text("Lightness");
-    });
-
-    // --- Chroma slider ---
-    ui.horizontal(|ui| {
-        color_slider_1d_grid(
-            ui,
-            &mut state.c,
-            lch.c / 0.325,
-            color_sample.color,
-            |c_mut| {
-                oklch_to_color32(Oklch {
-                    l,
-                    c: c_mut * 0.325,
-                    h,
-                })
-            },
-            None::<fn(f32) -> Color32>,
-            &"chroma",
-        )
-        .on_hover_text("Chroma");
-        let mut chroma_val = state.c * 0.325;
-        DragValue::new(&mut chroma_val)
-            .prefix("C: ")
-            .speed(0.001)
-            .range(0.0..=0.325)
-            .custom_formatter(|n, _| format!("{n:.03}"))
-            .ui(ui)
-            .on_hover_text("Chroma");
-        state.c = chroma_val / 0.325;
-    });
-
-    // --- Hue slider ---
-    let determine_hue_slider_colors = |h_mut| {
-        // Define lightness and chroma that exist for all hues
-        let bg_color_sample = oklch_to_color32(Oklch {
-            l: 0.750,
-            c: 0.127,
-            h: h_mut * std::f32::consts::TAU,
-        });
-        let bg_color = bg_color_sample.color.blend(Color32::from_black_alpha(40));
-        let color = Color32::from_rgba_unmultiplied(bg_color.r(), bg_color.g(), bg_color.b(), 210);
-        color
-    };
-    ui.horizontal(|ui| {
-        color_slider_1d_grid(
-            ui,
-            &mut state.h,
-            lch.h / std::f32::consts::TAU,
-            color_sample.color,
-            |h_mut| {
-                oklch_to_color32(Oklch {
-                    l: l,
-                    c: c,
-                    h: h_mut * std::f32::consts::TAU,
-                })
-            },
-            Some(determine_hue_slider_colors),
-            &"hue",
-        )
-        .on_hover_text("Hue");
-        let mut hue_val = state.h * 360.;
-        DragValue::new(&mut hue_val)
-            .prefix("H: ")
-            .speed(1.0)
-            .range(0.0..=360.)
-            .custom_formatter(|n, _| format!("{n:.1}"))
-            .ui(ui)
-            .on_hover_text("Hue");
-        state.h = hue_val / 360.;
-    });
-
-    // TODO: Add alpha slider?
-
-    if state != original_state {
-        update_color = true;
-        color_sample.color = oklch_to_color32(Oklch {
-            l: state.l,
-            c: state.c * 0.325,
-            h: state.h * std::f32::consts::TAU,
-        })
-        .color
-    }
-
-    ui.data_mut(|d| {
-        d.insert_temp(state_id, state);
-    });
-
-    (update_color, color_sample.color)
-}
-
 /// Shows 4 `DragValue` widgets to be used to edit the RGBA u8 values.
 /// Alpha's `DragValue` is hidden when `Alpha::Opaque`.
 ///
@@ -1158,15 +786,363 @@ pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Color32) -> Response {
     button_response
 }
 
-pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32) -> bool {
-    let mut new_lch = color32_to_oklch(*color);
-    let mut new_alpha = color.a() as f32 / 255.0;
+pub fn color_text_fields(ui: &mut Ui, color: &mut Color32) -> bool {
+    let original_color = color.clone();
 
-    let (update_color, new_color) = color_picker_oklch_2d(ui, &mut new_lch, &mut new_alpha);
+    // Hex text field
+    let mut rgb = [color.r(), color.g(), color.b()];
+    ui.horizontal(|ui| {
+        if HexEdit::new(&mut rgb).ui(ui, COLOR_SLIDER_WIDTH + 34.0) {
+            *color = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], color.a());
+        }
+    });
 
-    if update_color {
-        *color = new_color;
+    // RGB text fields
+    ui.horizontal(|ui| {
+        if RgbEdit::new(&mut rgb).ui(ui, COLOR_SLIDER_WIDTH + 34.) {
+            *color = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], color.a());
+        }
+    });
+
+    // HSV text fields
+    ui.horizontal(|ui| {
+        let mut hsv = color32_to_hsv(*color);
+        if HsvEdit::new(&mut hsv).ui(ui, COLOR_SLIDER_WIDTH + 34.) {
+            let rgba = hsv_to_color32(hsv).to_array();
+            *color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], color.a());
+        }
+    });
+
+    // Oklab text fields
+    ui.horizontal(|ui| {
+        let mut oklab = color32_to_oklab(*color);
+        if OklabEdit::new(&mut oklab).ui(ui, COLOR_SLIDER_WIDTH + 34.) {
+            let color_sample = oklab_to_color32(oklab);
+            let rgba = if color_sample.valid {
+                color_sample.color.to_array()
+            } else {
+                // TODO: fallback? Or implement an oklab_to_color32_with_chroma_fallback?
+                color_sample.color.to_array()
+            };
+            *color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], color.a());
+        }
+    });
+
+    // Oklch text fields
+    ui.horizontal(|ui| {
+        let mut oklch = color32_to_oklch(*color);
+
+        if OklchEdit::new(&mut oklch).ui(ui, COLOR_SLIDER_WIDTH + 34.) {
+            let color_sample = oklch_to_color32(oklch);
+            let rgba = if color_sample.valid {
+                color_sample.color.to_array()
+            } else {
+                // TODO: fallback? Or implement an oklab_to_color32_with_chroma_fallback?
+                color_sample.color.to_array()
+            };
+            *color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], color.a());
+        }
+    });
+
+    *color == original_color
+}
+
+pub fn oklch_sliders(ui: &mut Ui, color: &mut Color32) -> bool {
+    // Recover state from cache
+    let state_id = ui.id().with("oklch_ui_state");
+    let mut lch = color32_to_oklch(*color);
+    let l = lch.l;
+    let c = lch.c;
+    let h = lch.h;
+    let mut state: OklchUiState = ui
+        .data(|d| d.get_temp::<OklchUiState>(state_id))
+        .unwrap_or(OklchUiState { l, c, h });
+    let original_state = state.clone();
+
+    // Lightness slider
+    ui.horizontal(|ui| {
+        color_slider_1d_grid(
+            ui,
+            &mut state.l,
+            lch.l,
+            *color,
+            |l_mut| oklch_to_color32(Oklch { l: l_mut, c, h }),
+            None::<fn(f32) -> Color32>,
+            &"lightness",
+        )
+        .on_hover_text("Lightness");
+        DragValue::new(&mut state.l)
+            .prefix("L: ")
+            .speed(0.003)
+            .range(0.0..=1.0)
+            .custom_formatter(|n, _| format!("{n:.03}"))
+            .ui(ui)
+            .on_hover_text("Lightness");
+    });
+
+    // Chroma slider
+    ui.horizontal(|ui| {
+        color_slider_1d_grid(
+            ui,
+            &mut state.c,
+            lch.c / 0.325,
+            *color,
+            |c_mut| {
+                oklch_to_color32(Oklch {
+                    l,
+                    c: c_mut * 0.325,
+                    h,
+                })
+            },
+            None::<fn(f32) -> Color32>,
+            &"chroma",
+        )
+        .on_hover_text("Chroma");
+        let mut chroma_val = state.c * 0.325;
+        DragValue::new(&mut chroma_val)
+            .prefix("C: ")
+            .speed(0.001)
+            .range(0.0..=0.325)
+            .custom_formatter(|n, _| format!("{n:.03}"))
+            .ui(ui)
+            .on_hover_text("Chroma");
+        state.c = chroma_val / 0.325;
+    });
+
+    // Hue slider
+    let determine_hue_slider_colors = |h_mut| {
+        // Define lightness and chroma that exist for all hues
+        let bg_color_sample = oklch_to_color32(Oklch {
+            l: 0.750,
+            c: 0.127,
+            h: h_mut * std::f32::consts::TAU,
+        });
+        let bg_color = bg_color_sample.color.blend(Color32::from_black_alpha(40));
+        let color = Color32::from_rgba_unmultiplied(bg_color.r(), bg_color.g(), bg_color.b(), 210);
+        color
+    };
+    ui.horizontal(|ui| {
+        color_slider_1d_grid(
+            ui,
+            &mut state.h,
+            lch.h / std::f32::consts::TAU,
+            *color,
+            |h_mut| {
+                oklch_to_color32(Oklch {
+                    l: l,
+                    c: c,
+                    h: h_mut * std::f32::consts::TAU,
+                })
+            },
+            Some(determine_hue_slider_colors),
+            &"hue",
+        )
+        .on_hover_text("Hue");
+        let mut hue_val = state.h * 360.;
+        DragValue::new(&mut hue_val)
+            .prefix("H: ")
+            .speed(1.0)
+            .range(0.0..=360.)
+            .custom_formatter(|n, _| format!("{n:.1}"))
+            .ui(ui)
+            .on_hover_text("Hue");
+        state.h = hue_val / 360.;
+    });
+
+    // TODO: Add alpha slider?
+
+    let state_changed = state != original_state;
+    if state_changed {
+        let color_sample = oklch_to_color32(Oklch {
+            l: state.l,
+            c: state.c * 0.325,
+            h: state.h * std::f32::consts::TAU,
+        });
+        if color_sample.valid {
+            *color = color_sample.color;
+        } else {
+            // TODO: Implement fallback color
+            *color = color_sample.color;
+        }
     }
 
-    update_color
+    ui.data_mut(|d| {
+        d.insert_temp(state_id, state);
+    });
+
+    state_changed
+}
+
+pub fn plot_type_selector(ui: &mut Ui) -> OKLabPlotType {
+    let mut tab = ui.data(|d| {
+        d.get_temp::<OKLabPlotType>(ui.id())
+            .unwrap_or(OKLabPlotType::StableHue)
+    });
+
+    ui.horizontal(|ui| {
+        if ui
+            .selectable_label(matches!(tab, OKLabPlotType::StableHue), "Stable Hue")
+            .clicked()
+        {
+            tab = OKLabPlotType::StableHue;
+        }
+        if ui
+            .selectable_label(matches!(tab, OKLabPlotType::StableChroma), "Stable Chroma")
+            .clicked()
+        {
+            tab = OKLabPlotType::StableChroma;
+        }
+        if ui
+            .selectable_label(
+                matches!(tab, OKLabPlotType::StableLightness),
+                "Stable Lightness",
+            )
+            .clicked()
+        {
+            tab = OKLabPlotType::StableLightness;
+        }
+    });
+
+    ui.data_mut(|d| {
+        d.insert_temp(ui.id(), tab.clone());
+    });
+
+    tab
+}
+
+pub fn color_picker_panel_oklch_2d(
+    ui: &mut Ui,
+    color: &mut Color32,
+    plot_type: OKLabPlotType,
+) -> bool {
+    // Recover state from cache
+    let state_id = ui.id().with("oklch_ui_state");
+    let lch = color32_to_oklch(*color);
+    let l = lch.l;
+    let c = lch.c;
+    let h = lch.h;
+    let mut state: OklchUiState = ui
+        .data(|d| d.get_temp::<OklchUiState>(state_id))
+        .unwrap_or(OklchUiState { l, c, h });
+
+    let state_original = state.clone();
+
+    let (new_color, color_changed) = match plot_type {
+        OKLabPlotType::StableHue => {
+            let projection = StableHueProjection {
+                hue: state.h * std::f32::consts::TAU,
+            };
+
+            let mut coord = CartesianCoord {
+                x: state.c,
+                y: state.l,
+            };
+
+            let (_response, update_color) = color_slider_2d::<
+                CartesianTransform,
+                StableHueProjection,
+            >(
+                ui, &mut coord, projection, "StableHueColorPicker"
+            );
+
+            state.c = coord.x.min(0.325);
+            state.l = coord.y.min(1.0);
+
+            let picker_id = ui.id().with("StableHueColorPicker");
+
+            let picker = ui
+                .data(|d| d.get_temp::<StableHuePicker>(picker_id))
+                .unwrap();
+
+            (picker.nearest_valid_color(coord), update_color)
+        }
+
+        OKLabPlotType::StableChroma => {
+            let projection = StableChromaProjection { chroma: state.c };
+
+            let mut coord = PolarCoord {
+                angle: state.h * std::f32::consts::TAU,
+                radius: 1.0 - state.l,
+            };
+
+            let (_response, update_color) = color_slider_2d::<PolarTransform, StableChromaProjection>(
+                ui,
+                &mut coord,
+                projection,
+                "StableChromaColorPicker",
+            );
+
+            state.h = (coord.angle / std::f32::consts::TAU).rem_euclid(360.0);
+            state.l = 1.0 - coord.radius.min(1.0);
+
+            let picker_id = ui.id().with("StableChromaColorPicker");
+
+            let picker = ui
+                .data(|d| d.get_temp::<StableChromaPicker>(picker_id))
+                .unwrap();
+
+            (picker.nearest_valid_color(coord), update_color)
+        }
+
+        OKLabPlotType::StableLightness => {
+            let projection = StableLightnessProjection { lightness: state.l };
+
+            let mut coord = PolarCoord {
+                angle: state.h * std::f32::consts::TAU,
+                radius: state.c,
+            };
+
+            let (_response, update_color) =
+                color_slider_2d::<PolarTransform, StableLightnessProjection>(
+                    ui,
+                    &mut coord,
+                    projection,
+                    "StableLightnessColorPicker",
+                );
+
+            state.h = (coord.angle / std::f32::consts::TAU).rem_euclid(360.0);
+            state.c = coord.radius.min(1.0);
+
+            let picker_id = ui.id().with("StableLightnessColorPicker");
+
+            let picker = ui
+                .data(|d| d.get_temp::<StableLightnessPicker>(picker_id))
+                .unwrap();
+
+            (picker.nearest_valid_color(coord), update_color)
+        }
+    };
+
+    if color_changed {
+        *color = new_color;
+        ui.data_mut(|d| {
+            d.insert_temp(state_id, state);
+        });
+    } else {
+        // Note: We put back the original state in case the user did not click the
+        //       viewport to prevent rounding of state to the nearest pixel in case
+        //       state was set before by a different widget.
+        ui.data_mut(|d| {
+            d.insert_temp(state_id, state_original);
+        });
+    }
+
+    color_changed
+}
+
+pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32) -> bool {
+    let mut color_changed = false;
+
+    let plot_type = plot_type_selector(ui);
+
+    let current_color_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
+    show_srgba_unmultiplied(ui, color.to_array(), current_color_size)
+        .on_hover_text("Selected color");
+
+    color_changed |= color_picker_panel_oklch_2d(ui, color, plot_type);
+
+    color_changed |= oklch_sliders(ui, color);
+    color_changed |= color_text_fields(ui, color);
+
+    color_changed
 }
