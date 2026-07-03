@@ -787,13 +787,14 @@ pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Color32) -> Response {
 }
 
 pub fn color_text_fields(ui: &mut Ui, color: &mut Color32) -> bool {
-    let original_color = color.clone();
+    let mut changed = false;
 
     // Hex text field
     let mut rgb = [color.r(), color.g(), color.b()];
     ui.horizontal(|ui| {
         if HexEdit::new(&mut rgb).ui(ui, COLOR_SLIDER_WIDTH + 34.0) {
             *color = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], color.a());
+            changed = true;
         }
     });
 
@@ -801,6 +802,7 @@ pub fn color_text_fields(ui: &mut Ui, color: &mut Color32) -> bool {
     ui.horizontal(|ui| {
         if RgbEdit::new(&mut rgb).ui(ui, COLOR_SLIDER_WIDTH + 34.) {
             *color = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], color.a());
+            changed = true;
         }
     });
 
@@ -810,6 +812,7 @@ pub fn color_text_fields(ui: &mut Ui, color: &mut Color32) -> bool {
         if HsvEdit::new(&mut hsv).ui(ui, COLOR_SLIDER_WIDTH + 34.) {
             let rgba = hsv_to_color32(hsv).to_array();
             *color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], color.a());
+            changed = true;
         }
     });
 
@@ -825,6 +828,7 @@ pub fn color_text_fields(ui: &mut Ui, color: &mut Color32) -> bool {
                 color_sample.color.to_array()
             };
             *color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], color.a());
+            changed = true;
         }
     });
 
@@ -841,22 +845,27 @@ pub fn color_text_fields(ui: &mut Ui, color: &mut Color32) -> bool {
                 color_sample.color.to_array()
             };
             *color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], color.a());
+            changed = true;
         }
     });
 
-    *color == original_color
+    changed
 }
 
 pub fn oklch_sliders(ui: &mut Ui, color: &mut Color32) -> bool {
     // Recover state from cache
     let state_id = ui.id().with("oklch_ui_state");
-    let mut lch = color32_to_oklch(*color);
+    let lch = color32_to_oklch(*color);
     let l = lch.l;
     let c = lch.c;
     let h = lch.h;
-    let mut state: OklchUiState = ui
-        .data(|d| d.get_temp::<OklchUiState>(state_id))
-        .unwrap_or(OklchUiState { l, c, h });
+    let mut state: OklchUiState =
+        ui.data(|d| d.get_temp::<OklchUiState>(state_id))
+            .unwrap_or(OklchUiState {
+                l,
+                c: c / 0.325,
+                h: h / std::f32::consts::TAU,
+            });
     let original_state = state.clone();
 
     // Lightness slider
@@ -1018,12 +1027,13 @@ pub fn color_picker_panel_oklch_2d(
     // Recover state from cache
     let state_id = ui.id().with("oklch_ui_state");
     let lch = color32_to_oklch(*color);
-    let l = lch.l;
-    let c = lch.c;
-    let h = lch.h;
-    let mut state: OklchUiState = ui
-        .data(|d| d.get_temp::<OklchUiState>(state_id))
-        .unwrap_or(OklchUiState { l, c, h });
+    let mut state: OklchUiState =
+        ui.data(|d| d.get_temp::<OklchUiState>(state_id))
+            .unwrap_or(OklchUiState {
+                l: lch.l,
+                c: lch.c / 0.325,
+                h: lch.h / std::f32::consts::TAU,
+            });
 
     let state_original = state.clone();
 
@@ -1045,7 +1055,7 @@ pub fn color_picker_panel_oklch_2d(
                 ui, &mut coord, projection, "StableHueColorPicker"
             );
 
-            state.c = coord.x.min(0.325);
+            state.c = coord.x.min(1.0);
             state.l = coord.y.min(1.0);
 
             let picker_id = ui.id().with("StableHueColorPicker");
@@ -1072,7 +1082,7 @@ pub fn color_picker_panel_oklch_2d(
                 "StableChromaColorPicker",
             );
 
-            state.h = (coord.angle / std::f32::consts::TAU).rem_euclid(360.0);
+            state.h = coord.angle.rem_euclid(360.0) / std::f32::consts::TAU;
             state.l = 1.0 - coord.radius.min(1.0);
 
             let picker_id = ui.id().with("StableChromaColorPicker");
@@ -1140,9 +1150,21 @@ pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32) -> bool {
         .on_hover_text("Selected color");
 
     color_changed |= color_picker_panel_oklch_2d(ui, color, plot_type);
-
     color_changed |= oklch_sliders(ui, color);
-    color_changed |= color_text_fields(ui, color);
+    if color_text_fields(ui, color) {
+        color_changed = true;
+        // Also update state indicators when color changed from direct text inserts
+        let state_id = ui.id().with("oklch_ui_state");
+        let lch = color32_to_oklch(*color);
+        let state = OklchUiState {
+            l: lch.l,
+            c: lch.c / 0.325,
+            h: lch.h / std::f32::consts::TAU,
+        };
+        ui.data_mut(|d| {
+            d.insert_temp(state_id, state);
+        });
+    }
 
     color_changed
 }
