@@ -193,9 +193,7 @@ where
 
         let mut viewport_changed = false;
 
-        //
         // Pan
-        //
         let is_pan_button_down = response.ctx.input(|i| {
             i.pointer.button_down(PointerButton::Secondary)
                 || i.pointer.button_down(PointerButton::Middle)
@@ -217,9 +215,7 @@ where
             self.viewport[3] += dy_world;
         }
 
-        //
         // Zoom
-        //
         let scroll = response.ctx.input(|i| i.raw_scroll_delta.y);
 
         if scroll.abs() > 0.0 {
@@ -249,13 +245,9 @@ where
                 }
 
                 viewport_changed = true;
-
                 self.viewport[0] = world.x + (self.viewport[0] - world.x) * zoom_factor;
-
                 self.viewport[2] = world.x + (self.viewport[2] - world.x) * zoom_factor;
-
                 self.viewport[1] = world.y + (self.viewport[1] - world.y) * zoom_factor;
-
                 self.viewport[3] = world.y + (self.viewport[3] - world.y) * zoom_factor;
             }
         }

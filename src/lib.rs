@@ -71,6 +71,9 @@ pub fn background_checkers(painter: &Painter, rect: Rect, ny: u32) {
             // Offset every other cell
             if modulus(i_x as f32 + i_y as f32, 2.) == 0. {
                 i_x += 1;
+                if i_x >= nx {
+                    break;
+                }
             }
             let x = lerp(rect.left()..=rect.right(), i_x as f32 / nx as f32);
             let cell_top = rect.top() + i_y as f32 * checker_size;
@@ -118,7 +121,7 @@ struct OklchUiState {
     h: f32,
 }
 
-fn color_slider_1d_grid(
+pub fn color_slider_1d_grid(
     ui: &mut Ui,
     slider_value: &mut f32,
     slider_value_nearest_color: f32,
@@ -130,7 +133,9 @@ fn color_slider_1d_grid(
     let desired_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 
+    let mut changed = false;
     if let Some(mpos) = response.interact_pointer_pos() {
+        changed = true;
         *slider_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
     }
 
@@ -146,8 +151,8 @@ fn color_slider_1d_grid(
         let nx = rect.width().max(1.0).round() as usize;
         let ny = rect.height().max(1.0).round() as usize;
 
-        // Fixme: Also dependent on change in l,c,h values, forn now just always rebuild
-        // let rebuild = tex.is_none() || tex.as_ref().unwrap().size() != [nx, ny];
+        // TODO: rebuild when needed. Also dependent on change in l,c,h values. For now just always rebuild
+        // let rebuild = changed || tex.is_none() || tex.as_ref().unwrap().size() != [nx, ny] || slider_value != prev_slider_value;
         let rebuild = true;
 
         background_checkers(ui.painter(), rect, 4);
@@ -158,13 +163,13 @@ fn color_slider_1d_grid(
             // Row-major order as expected by ColorImage
             for _y in 0..ny {
                 for x in 0..nx {
-                    let t = if nx > 1 {
+                    let x_normalized = if nx > 1 {
                         x as f32 / (nx as f32 - 1.0)
                     } else {
                         0.0
                     };
 
-                    let color_sample = color_at(t);
+                    let color_sample = color_at(x_normalized);
                     if color_sample.valid {
                         pixels.push(color_sample.color.r());
                         pixels.push(color_sample.color.g());
@@ -179,7 +184,7 @@ fn color_slider_1d_grid(
                                 pixels.push(0);
                             }
                             Some(ref bg_color_at) => {
-                                let color = bg_color_at(t);
+                                let color = bg_color_at(x_normalized);
                                 pixels.push(color.r());
                                 pixels.push(color.g());
                                 pixels.push(color.b());
@@ -337,7 +342,6 @@ where
         color_is_valid = sample.valid;
 
         // Draw marker
-        let marker_pos = picker.coord_to_pixel(*coord);
         let (indicator_color, marker_angle) = if sample.valid {
             (Color32::WHITE, 45.)
         } else {
