@@ -25,7 +25,8 @@ impl eframe::App for MyApp {
 
             ui.label("Pick a color:");
 
-            color_edit_button_oklcha(ui, &mut self.color);
+            let widget_width = 350.;
+            color_edit_button_oklcha(ui, &mut self.color, widget_width);
 
             let mut hsva = self.color_reference.into();
             ui.color_edit_button_hsva(&mut hsva);

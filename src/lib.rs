@@ -31,8 +31,6 @@ use epaint::{
     pos2, vec2,
 };
 
-const COLOR_SLIDER_WIDTH: f32 = 275.0;
-
 fn contrast_color(color: impl Into<Rgba>) -> Color32 {
     if color.into().intensity() < 0.5 {
         Color32::WHITE
@@ -765,7 +763,7 @@ fn rgba_edit_ui(ui: &mut Ui, [r, g, b, a]: &mut [f32; 4], alpha: Alpha) -> bool 
     edited
 }
 
-pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Color32) -> Response {
+pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Color32, widget_width: f32) -> Response {
     let popup_id = ui.auto_id_with("popup");
     let open = Popup::is_id_open(ui.ctx(), popup_id);
     let mut button_response = color_button(ui, color.to_srgba_unmultiplied(), open);
@@ -777,8 +775,8 @@ pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Color32) -> Response {
         .id(popup_id)
         .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
-            ui.spacing_mut().slider_width = COLOR_SLIDER_WIDTH;
-            if color_picker_oklcha_2d(ui, color) {
+            ui.spacing_mut().slider_width = widget_width;
+            if color_picker_oklcha_2d(ui, color, widget_width) {
                 button_response.mark_changed();
             }
         });
@@ -786,13 +784,13 @@ pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Color32) -> Response {
     button_response
 }
 
-pub fn color_text_fields(ui: &mut Ui, color: &mut Color32) -> bool {
+pub fn color_text_fields(ui: &mut Ui, color: &mut Color32, widget_width: f32) -> bool {
     let mut changed = false;
 
     // Hex text field
     let mut rgb = [color.r(), color.g(), color.b()];
     ui.horizontal(|ui| {
-        if HexEdit::new(&mut rgb).ui(ui, COLOR_SLIDER_WIDTH + 34.0) {
+        if HexEdit::new(&mut rgb).ui(ui, widget_width + 34.0) {
             *color = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], color.a());
             changed = true;
         }
@@ -800,7 +798,7 @@ pub fn color_text_fields(ui: &mut Ui, color: &mut Color32) -> bool {
 
     // RGB text fields
     ui.horizontal(|ui| {
-        if RgbEdit::new(&mut rgb).ui(ui, COLOR_SLIDER_WIDTH + 34.) {
+        if RgbEdit::new(&mut rgb).ui(ui, widget_width + 34.) {
             *color = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], color.a());
             changed = true;
         }
@@ -809,7 +807,7 @@ pub fn color_text_fields(ui: &mut Ui, color: &mut Color32) -> bool {
     // HSV text fields
     ui.horizontal(|ui| {
         let mut hsv = color32_to_hsv(*color);
-        if HsvEdit::new(&mut hsv).ui(ui, COLOR_SLIDER_WIDTH + 34.) {
+        if HsvEdit::new(&mut hsv).ui(ui, widget_width + 34.) {
             let rgba = hsv_to_color32(hsv).to_array();
             *color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], color.a());
             changed = true;
@@ -819,7 +817,7 @@ pub fn color_text_fields(ui: &mut Ui, color: &mut Color32) -> bool {
     // Oklab text fields
     ui.horizontal(|ui| {
         let mut oklab = color32_to_oklab(*color);
-        if OklabEdit::new(&mut oklab).ui(ui, COLOR_SLIDER_WIDTH + 34.) {
+        if OklabEdit::new(&mut oklab).ui(ui, widget_width + 34.) {
             let color_sample = oklab_to_color32(oklab);
             let rgba = if color_sample.valid {
                 color_sample.color.to_array()
@@ -836,7 +834,7 @@ pub fn color_text_fields(ui: &mut Ui, color: &mut Color32) -> bool {
     ui.horizontal(|ui| {
         let mut oklch = color32_to_oklch(*color);
 
-        if OklchEdit::new(&mut oklch).ui(ui, COLOR_SLIDER_WIDTH + 34.) {
+        if OklchEdit::new(&mut oklch).ui(ui, widget_width + 34.) {
             let color_sample = oklch_to_color32(oklch);
             let rgba = if color_sample.valid {
                 color_sample.color.to_array()
@@ -1140,7 +1138,7 @@ pub fn color_picker_panel_oklch_2d(
     color_changed
 }
 
-pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32) -> bool {
+pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32, widget_width: f32) -> bool {
     let mut color_changed = false;
 
     let plot_type = plot_type_selector(ui);
@@ -1151,7 +1149,7 @@ pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32) -> bool {
 
     color_changed |= color_picker_panel_oklch_2d(ui, color, plot_type);
     color_changed |= oklch_sliders(ui, color);
-    if color_text_fields(ui, color) {
+    if color_text_fields(ui, color, widget_width) {
         color_changed = true;
         // Also update state indicators when color changed from direct text inserts
         let state_id = ui.id().with("oklch_ui_state");
