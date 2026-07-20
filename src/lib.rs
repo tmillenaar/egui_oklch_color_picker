@@ -120,6 +120,7 @@ struct OklchUiState {
     l: f32,
     c: f32,
     h: f32,
+    a: f32,
 }
 
 pub fn color_slider_1d_grid(
@@ -533,82 +534,86 @@ pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Color32, widget_width: 
     button_response
 }
 
-pub fn color_text_fields(ui: &mut Ui, color: &mut Color32, widget_width: f32) -> bool {
+pub fn color_text_fields(ui: &mut Ui, color: Color32, widget_width: f32) -> (bool, Color32) {
     let mut changed = false;
+    let mut new_color = color.clone();
 
     // Hex text field
-    let mut rgb = [color.r(), color.g(), color.b()];
+    let mut srgba = color.to_srgba_unmultiplied();
+    let mut srgb = [srgba[0], srgba[1], srgba[2]];
+    let alpha = srgba[3];
     ui.horizontal(|ui| {
-        if HexEdit::new(&mut rgb).ui(ui, widget_width + 34.0) {
-            *color = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], color.a());
+        if HexEdit::new(&mut srgb).ui(ui, widget_width + 34.0) {
+            new_color = Color32::from_rgba_unmultiplied(srgb[0], srgb[1], srgb[2], alpha);
             changed = true;
         }
     });
 
     // RGB text fields
     ui.horizontal(|ui| {
-        if RgbEdit::new(&mut rgb).ui(ui, widget_width + 34.) {
-            *color = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], color.a());
+        if RgbEdit::new(&mut srgb).ui(ui, widget_width + 34.) {
+            new_color = Color32::from_rgba_unmultiplied(srgb[0], srgb[1], srgb[2], alpha);
             changed = true;
         }
     });
 
     // HSV text fields
     ui.horizontal(|ui| {
-        let mut hsv = color32_to_hsv(*color);
+        let mut hsv = color32_to_hsv(color.to_opaque());
         if HsvEdit::new(&mut hsv).ui(ui, widget_width + 34.) {
             let rgba = hsv_to_color32(hsv).to_array();
-            *color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], color.a());
+            new_color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], alpha);
             changed = true;
         }
     });
 
     // Oklab text fields
     ui.horizontal(|ui| {
-        let mut oklab = color32_to_oklab(*color);
+        let mut oklab = color32_to_oklab(color.to_opaque());
         if OklabEdit::new(&mut oklab).ui(ui, widget_width + 34.) {
             let color_sample = oklab_to_color32(oklab);
             let rgba = if color_sample.valid {
-                color_sample.color.to_array()
+                color_sample.color.to_srgba_unmultiplied()
             } else {
                 // TODO: fallback? Or implement an oklab_to_color32_with_chroma_fallback?
-                color_sample.color.to_array()
+                color_sample.color.to_srgba_unmultiplied()
             };
-            *color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], color.a());
+            new_color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], alpha);
             changed = true;
         }
     });
 
     // Oklch text fields
     ui.horizontal(|ui| {
-        let mut oklch = color32_to_oklch(*color);
+        let mut oklch = color32_to_oklch(color.to_opaque());
 
         if OklchEdit::new(&mut oklch).ui(ui, widget_width + 34.) {
             let color_sample = oklch_to_color32(oklch);
             let rgba = if color_sample.valid {
-                color_sample.color.to_array()
+                color_sample.color.to_srgba_unmultiplied()
             } else {
                 // TODO: fallback? Or implement an oklab_to_color32_with_chroma_fallback?
-                color_sample.color.to_array()
+                color_sample.color.to_srgba_unmultiplied()
             };
-            *color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], color.a());
+            new_color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], color.a());
             changed = true;
         }
     });
 
-    changed
+    (changed, new_color)
 }
 
-pub fn oklch_sliders(ui: &mut Ui, color: Color32) -> (bool, OklchUiState) {
+pub fn oklch_sliders(ui: &mut Ui, fallback_color: Color32) -> (bool, OklchUiState) {
     // Recover state from cache
     let state_id = ui.id().with("oklch_ui_state");
-    let lch = color32_to_oklch(color);
+    let lch = color32_to_oklch(fallback_color);
     let mut state: OklchUiState =
         ui.data(|d| d.get_temp::<OklchUiState>(state_id))
             .unwrap_or(OklchUiState {
                 l: lch.l,
                 c: lch.c / 0.325,
                 h: lch.h / std::f32::consts::TAU,
+                a: 1.0,
             });
     let original_state = state.clone();
     let l = state.l;
@@ -621,7 +626,7 @@ pub fn oklch_sliders(ui: &mut Ui, color: Color32) -> (bool, OklchUiState) {
             ui,
             &mut state.l,
             lch.l,
-            color,
+            fallback_color,
             |l_mut| oklch_to_color32(Oklch { l: l_mut, c, h }),
             None::<fn(f32) -> Color32>,
             &"lightness",
@@ -642,7 +647,7 @@ pub fn oklch_sliders(ui: &mut Ui, color: Color32) -> (bool, OklchUiState) {
             ui,
             &mut state.c,
             lch.c / 0.325,
-            color,
+            fallback_color,
             |c_mut| {
                 oklch_to_color32(Oklch {
                     l,
@@ -682,7 +687,7 @@ pub fn oklch_sliders(ui: &mut Ui, color: Color32) -> (bool, OklchUiState) {
             ui,
             &mut state.h,
             lch.h / std::f32::consts::TAU,
-            color,
+            fallback_color,
             |h_mut| {
                 oklch_to_color32(Oklch {
                     l: l,
@@ -705,7 +710,44 @@ pub fn oklch_sliders(ui: &mut Ui, color: Color32) -> (bool, OklchUiState) {
         state.h = hue_val / 360.;
     });
 
-    // TODO: Add alpha slider?
+    let with_alpha = true;
+    if with_alpha {
+        ui.horizontal(|ui| {
+            color_slider_1d_grid(
+                ui,
+                &mut state.a,
+                lch.h / std::f32::consts::TAU,
+                fallback_color,
+                |alpha| {
+                    // let mut sample_color = oklch_to_color32(Oklch {
+                    //     l: l,
+                    //     c: c,
+                    //     h: h * std::f32::consts::TAU,
+                    // });
+                    let mut rgba = fallback_color.to_srgba_unmultiplied();
+                    ColorSample {
+                        color: Color32::from_rgba_unmultiplied(
+                            rgba[0],
+                            rgba[1],
+                            rgba[2],
+                            (alpha  * 255.) as u8,
+                        ),
+                        valid: true,
+                    }
+                },
+                None::<fn(f32) -> Color32>,
+                &"alpha",
+            )
+            .on_hover_text("Transparency (Alpha)");
+            DragValue::new(&mut state.a)
+                .prefix("A: ")
+                .speed(1.0)
+                .range(0.0..=1.0)
+                .custom_formatter(|n, _| format!("{n:.3}"))
+                .ui(ui)
+                .on_hover_text("Transparency");
+        });
+    }
 
     let state_changed = state != original_state;
 
@@ -760,23 +802,22 @@ pub fn plot_type_selector(ui: &mut Ui) -> (bool, OKLabPlotType) {
 
 pub fn color_picker_panel_oklch_2d(
     ui: &mut Ui,
-    color: Color32,
     plot_type: OKLabPlotType,
 ) -> (bool, Color32) {
     // Recover state from cache
     let state_id = ui.id().with("oklch_ui_state");
-    let lch = color32_to_oklch(color);
     let mut state: OklchUiState =
         ui.data(|d| d.get_temp::<OklchUiState>(state_id))
             .unwrap_or(OklchUiState {
-                l: lch.l,
-                c: lch.c / 0.325,
-                h: lch.h / std::f32::consts::TAU,
+                l: 0.5,
+                c: 0.3,
+                h: 0.0,
+                a: 1.0,
             });
 
     let state_original = state.clone();
 
-    let (new_color, color_changed) = match plot_type {
+    let (mut new_color, color_changed) = match plot_type {
         OKLabPlotType::StableHue => {
             let projection = StableHueProjection {
                 hue: state.h * std::f32::consts::TAU,
@@ -879,17 +920,26 @@ pub fn color_picker_panel_oklch_2d(
 }
 
 pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32, widget_width: f32) -> bool {
+
+    let color_opague = color.to_opaque();
     let (tab_changed, plot_type) = plot_type_selector(ui);
 
     let current_color_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
     show_color(ui, *color, current_color_size).on_hover_text("Selected color");
 
-    let (color_changed_in_2d_panel, new_color) = color_picker_panel_oklch_2d(ui, *color, plot_type);
-    if color_changed_in_2d_panel | tab_changed {
-        *color = new_color;
-    }
+    let (color_changed_in_2d_panel, new_color_opague) = color_picker_panel_oklch_2d(ui, plot_type);
 
-    let (color_changed_by_sliders, new_state) = oklch_sliders(ui, *color);
+    let (color_changed_by_sliders, new_state) = oklch_sliders(ui, new_color_opague);
+
+    if color_changed_in_2d_panel | tab_changed {
+        let rgba = new_color_opague.to_array();
+        *color = Color32::from_rgba_unmultiplied(
+            rgba[0],
+            rgba[1],
+            rgba[2],
+            (new_state.a * 255.) as u8,
+        );
+    }
     if color_changed_by_sliders {
         let color_sample = oklch_to_color32(Oklch {
             l: new_state.l,
@@ -897,23 +947,42 @@ pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32, widget_width: f3
             h: new_state.h * std::f32::consts::TAU,
         });
         if color_sample.valid {
-            *color = color_sample.color;
+            *color = Color32::from_rgba_unmultiplied(
+                color_sample.color.r(),
+                color_sample.color.g(),
+                color_sample.color.b(),
+                (new_state.a * 255.) as u8,
+            );
         } else {
             // Fallback color using 2d panel
-            *color = new_color;
+            let rgba = new_color_opague.to_array();
+            *color = Color32::from_rgba_unmultiplied(
+                rgba[0],
+                rgba[1],
+                rgba[2],
+                (new_state.a * 255.) as u8,
+            );
         }
     }
 
-    let color_changed_by_text_field = color_text_fields(ui, color, widget_width);
+    let (color_changed_by_text_field, new_color_from_text) = color_text_fields(ui, new_color_opague, widget_width);
     if color_changed_by_text_field {
         // Also update state indicators when color changed from direct text inserts
         let state_id = ui.id().with("oklch_ui_state");
-        let lch = color32_to_oklch(*color);
+        let lch = color32_to_oklch(new_color_from_text);
         let state = OklchUiState {
             l: lch.l,
             c: lch.c / 0.325,
             h: lch.h / std::f32::consts::TAU,
+            a: new_state.a,
         };
+        let rgba = new_color_from_text.to_array();
+        *color = Color32::from_rgba_unmultiplied(
+            rgba[0],
+            rgba[1],
+            rgba[2],
+            (new_state.a * 255.) as u8,
+        );
         ui.data_mut(|d| {
             d.insert_temp(state_id, state);
         });
