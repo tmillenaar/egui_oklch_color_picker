@@ -22,7 +22,7 @@ use std::f32;
 use std::f32::consts::TAU;
 use std::sync::Arc;
 
-use egui::color_picker::{Alpha, show_color, show_color_at};
+// use egui::color_picker::{Alpha, show_color, show_color_at};
 use egui::epaint::RectShape;
 use egui::*;
 use epaint::{
@@ -100,7 +100,7 @@ fn color_button(ui: &mut Ui, color: Color32, open: bool) -> Response {
         let rect = rect.expand(visuals.expansion);
 
         let stroke_width = 1.0;
-        show_color_at(ui.painter(), color, rect.shrink(stroke_width));
+        show_color_at(ui.painter(), color, rect.shrink(stroke_width), 3);
 
         let corner_radius = visuals.corner_radius.at_most(2); // Can't do more rounding because the background grid doesn't do any rounding
         ui.painter().rect_stroke(
@@ -719,14 +719,10 @@ pub fn oklch_sliders(ui: &mut Ui, fallback_color: Color32) -> (bool, OklchUiStat
                 lch.h / std::f32::consts::TAU,
                 fallback_color,
                 |alpha| {
-                    // let mut sample_color = oklch_to_color32(Oklch {
-                    //     l: l,
-                    //     c: c,
-                    //     h: h * std::f32::consts::TAU,
-                    // });
-                    let mut rgba = fallback_color.to_srgba_unmultiplied();
+                    // let mut rgba = fallback_color.to_srgba_unmultiplied();
+                    let mut rgba = fallback_color.to_array();
                     ColorSample {
-                        color: Color32::from_rgba_unmultiplied(
+                        color: Color32::from_rgba_premultiplied(
                             rgba[0],
                             rgba[1],
                             rgba[2],
@@ -994,4 +990,37 @@ pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32, widget_width: f3
         | tab_changed;
 
     color_changed
+}
+
+
+/// Show a color with background checkers to demonstrate transparency (if any).
+pub fn show_color(ui: &mut Ui, color: impl Into<Color32>, desired_size: Vec2) -> Response {
+    show_color32(ui, color.into(), desired_size)
+}
+
+fn show_color32(ui: &mut Ui, color: Color32, desired_size: Vec2) -> Response {
+    let (rect, response) = ui.allocate_at_least(desired_size, Sense::hover());
+    if ui.is_rect_visible(rect) {
+        show_color_at(ui.painter(), color, rect, 3);
+    }
+    response
+}
+
+/// Show a color with background checkers to demonstrate transparency (if any).
+pub fn show_color_at(painter: &Painter, color: Color32, rect: Rect, nr_cells_y: u32) {
+    if color.is_opaque() {
+        painter.rect_filled(rect, 0.0, color);
+    } else {
+        // Transparent: how both the transparent and opaque versions of the color
+        background_checkers(painter, rect, nr_cells_y);
+
+        if color == Color32::TRANSPARENT {
+            // There is no opaque version, so just show the background checkers
+        } else {
+            let left = Rect::from_min_max(rect.left_top(), rect.center_bottom());
+            let right = Rect::from_min_max(rect.center_top(), rect.right_bottom());
+            painter.rect_filled(left, 0.0, color);
+            painter.rect_filled(right, 0.0, color.to_opaque());
+        }
+    }
 }
