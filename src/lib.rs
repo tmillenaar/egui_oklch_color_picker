@@ -4,6 +4,8 @@
 mod color_projection;
 mod conversions;
 mod coordinate_transforms;
+mod oklaba;
+mod oklcha;
 mod picker_2d;
 mod text_fields;
 mod ui_extras;
@@ -11,6 +13,8 @@ mod ui_extras;
 use crate::color_projection::*;
 use crate::conversions::*;
 use crate::coordinate_transforms::*;
+use crate::oklaba::*;
+use crate::oklcha::*;
 use crate::picker_2d::*;
 use crate::text_fields::hex_text_field::*;
 use crate::text_fields::hsv_text_fields::*;
@@ -20,7 +24,6 @@ use crate::text_fields::rgb_text_fields::*;
 
 use std::f32;
 use std::f32::consts::TAU;
-use std::sync::Arc;
 
 use egui::color_picker::{Alpha, show_color, show_color_at};
 use egui::epaint::RectShape;
@@ -569,7 +572,7 @@ pub fn color_text_fields(ui: &mut Ui, color: Color32, widget_width: f32) -> (boo
 
     // Oklab text fields
     ui.horizontal(|ui| {
-        let mut oklab = color32_to_oklab(color.to_opaque());
+        let mut oklab = Oklaba::from(color.to_opaque());
         if OklabEdit::new(&mut oklab).ui(ui, widget_width + 34.) {
             let color_sample = oklab_to_color32(oklab);
             let rgba = if color_sample.valid {
@@ -730,7 +733,7 @@ pub fn oklch_sliders(ui: &mut Ui, fallback_color: Color32) -> (bool, OklchUiStat
                             rgba[0],
                             rgba[1],
                             rgba[2],
-                            (alpha  * 255.) as u8,
+                            (alpha * 255.) as u8,
                         ),
                         valid: true,
                     }
@@ -800,10 +803,7 @@ pub fn plot_type_selector(ui: &mut Ui) -> (bool, OKLabPlotType) {
     (tab_changed, tab)
 }
 
-pub fn color_picker_panel_oklch_2d(
-    ui: &mut Ui,
-    plot_type: OKLabPlotType,
-) -> (bool, Color32) {
+pub fn color_picker_panel_oklch_2d(ui: &mut Ui, plot_type: OKLabPlotType) -> (bool, Color32) {
     // Recover state from cache
     let state_id = ui.id().with("oklch_ui_state");
     let mut state: OklchUiState =
@@ -920,7 +920,6 @@ pub fn color_picker_panel_oklch_2d(
 }
 
 pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32, widget_width: f32) -> bool {
-
     let color_opague = color.to_opaque();
     let (tab_changed, plot_type) = plot_type_selector(ui);
 
@@ -933,12 +932,8 @@ pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32, widget_width: f3
 
     if color_changed_in_2d_panel | tab_changed {
         let rgba = new_color_opague.to_array();
-        *color = Color32::from_rgba_unmultiplied(
-            rgba[0],
-            rgba[1],
-            rgba[2],
-            (new_state.a * 255.) as u8,
-        );
+        *color =
+            Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], (new_state.a * 255.) as u8);
     }
     if color_changed_by_sliders {
         let color_sample = oklch_to_color32(Oklch {
@@ -965,7 +960,8 @@ pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32, widget_width: f3
         }
     }
 
-    let (color_changed_by_text_field, new_color_from_text) = color_text_fields(ui, new_color_opague, widget_width);
+    let (color_changed_by_text_field, new_color_from_text) =
+        color_text_fields(ui, new_color_opague, widget_width);
     if color_changed_by_text_field {
         // Also update state indicators when color changed from direct text inserts
         let state_id = ui.id().with("oklch_ui_state");
@@ -977,12 +973,8 @@ pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32, widget_width: f3
             a: new_state.a,
         };
         let rgba = new_color_from_text.to_array();
-        *color = Color32::from_rgba_unmultiplied(
-            rgba[0],
-            rgba[1],
-            rgba[2],
-            (new_state.a * 255.) as u8,
-        );
+        *color =
+            Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], (new_state.a * 255.) as u8);
         ui.data_mut(|d| {
             d.insert_temp(state_id, state);
         });
