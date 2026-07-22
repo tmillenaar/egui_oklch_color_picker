@@ -1,14 +1,11 @@
 use crate::conversions::*;
+use crate::oklaba::*;
+use crate::oklcha::*;
 use crate::coordinate_transforms::*;
 use egui::*;
 
-pub struct ColorSample {
-    pub valid: bool,
-    pub color: Color32,
-}
-
 pub trait ColorProjection<C> {
-    fn color_at(&self, coord: C) -> ColorSample;
+    fn color_at(&self, coord: C) -> Oklcha;
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -17,12 +14,13 @@ pub struct StableHueProjection {
 }
 
 impl ColorProjection<CartesianCoord> for StableHueProjection {
-    fn color_at(&self, coord: CartesianCoord) -> ColorSample {
-        oklch_to_color32(Oklch {
+    fn color_at(&self, coord: CartesianCoord) -> Oklcha {
+        Oklcha {
             l: coord.y,
             c: coord.x * 0.325,
             h: self.hue,
-        })
+            alpha: 1.0,
+        }
     }
 }
 
@@ -32,12 +30,13 @@ pub struct StableChromaProjection {
 }
 
 impl ColorProjection<PolarCoord> for StableChromaProjection {
-    fn color_at(&self, coord: PolarCoord) -> ColorSample {
-        oklch_to_color32(Oklch {
+    fn color_at(&self, coord: PolarCoord) -> Oklcha {
+        Oklcha {
             l: 1.0 - coord.radius,
             c: self.chroma * 0.325,
             h: coord.angle,
-        })
+            alpha: 1.0,
+        }
     }
 }
 
@@ -47,11 +46,12 @@ pub struct StableLightnessProjection {
 }
 
 impl ColorProjection<PolarCoord> for StableLightnessProjection {
-    fn color_at(&self, coord: PolarCoord) -> ColorSample {
-        oklch_to_color32(Oklch {
+    fn color_at(&self, coord: PolarCoord) -> Oklcha {
+        Oklcha {
             l: self.lightness,
             c: coord.radius * 0.325,
             h: coord.angle,
-        })
+            alpha: 1.0,
+        }
     }
 }

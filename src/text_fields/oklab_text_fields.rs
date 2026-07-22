@@ -1,10 +1,11 @@
 use crate::conversions::*;
+use crate::oklaba::*;
 use crate::text_fields::editable_text_field::*;
 use crate::ui_extras::copy_icon::*;
 
 use egui::*;
 
-fn parse_oklab(text: &str) -> Option<Oklab> {
+fn parse_oklab(text: &str) -> Option<Oklaba> {
     let text = text
         .trim()
         .trim_matches(|c| matches!(c, '(' | ')' | '[' | ']' | '{' | '}'));
@@ -22,15 +23,15 @@ fn parse_oklab(text: &str) -> Option<Oklab> {
     let a = parts[1].parse::<f32>().ok()?;
     let b = parts[2].parse::<f32>().ok()?;
 
-    Some(Oklab { l, a, b })
+    Some(Oklaba { l, a, b, alpha: 1.0 })
 }
 
 pub struct OklabEdit<'a> {
-    pub oklab: &'a mut Oklab,
+    pub oklab: &'a mut Oklaba,
 }
 
 impl<'a> OklabEdit<'a> {
-    pub fn new(oklab: &'a mut Oklab) -> Self {
+    pub fn new(oklab: &'a mut Oklaba) -> Self {
         Self { oklab }
     }
 
@@ -74,7 +75,7 @@ impl<'a> OklabEdit<'a> {
             0 => &mut self.oklab.l,
             1 => &mut self.oklab.a,
             2 => &mut self.oklab.b,
-            _ => unreachable!("Oklab does not have a 4th component"),
+            _ => unreachable!("Oklab does not have a 4th component, alpha is treated separately"),
         };
 
         let (_, edit) = editable_text_field(ui, id, label, format!("{:.3}", component), 38.);

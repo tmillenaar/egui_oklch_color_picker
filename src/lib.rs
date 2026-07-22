@@ -4,6 +4,8 @@
 mod color_projection;
 mod conversions;
 mod coordinate_transforms;
+pub mod oklaba;
+pub mod oklcha;
 mod picker_2d;
 mod text_fields;
 mod ui_extras;
@@ -11,6 +13,8 @@ mod ui_extras;
 use crate::color_projection::*;
 use crate::conversions::*;
 use crate::coordinate_transforms::*;
+use crate::oklaba::*;
+use crate::oklcha::*;
 use crate::picker_2d::*;
 use crate::text_fields::hex_text_field::*;
 use crate::text_fields::hsv_text_fields::*;
@@ -19,19 +23,15 @@ use crate::text_fields::oklch_text_fields::*;
 use crate::text_fields::rgb_text_fields::*;
 
 use std::f32;
-use std::sync::Arc;
+use std::f32::consts::TAU;
 
-use egui::Order::Background;
 use egui::epaint::RectShape;
 use egui::*;
-use egui::{cache::*, viewport};
 use epaint::{
     Mesh, Rect, Shape, Stroke, StrokeKind, Vec2,
-    ecolor::{Color32, Hsva, HsvaGamma, Rgba},
+    ecolor::{Color32, Rgba},
     pos2, vec2,
 };
-
-const COLOR_SLIDER_WIDTH: f32 = 275.0;
 
 fn contrast_color(color: impl Into<Rgba>) -> Color32 {
     if color.into().intensity() < 0.5 {
@@ -41,12 +41,12 @@ fn contrast_color(color: impl Into<Rgba>) -> Color32 {
     }
 }
 
-/// In rust, & is the remainder, not the modulus
+/// In rust, % is the remainder, not the modulus
 fn modulus(val: f32, modulus: f32) -> f32 {
     ((val % modulus) + modulus) % modulus
 }
 
-fn background_checkers(painter: &Painter, rect: Rect, ny: u32) {
+pub fn background_checkers(painter: &Painter, rect: Rect, ny: u32) {
     let rect = rect.shrink(0.5); // Small hack to avoid the checkers from peeking through the sides
 
     let dark_color = Color32::from_gray(80);
@@ -74,6 +74,9 @@ fn background_checkers(painter: &Painter, rect: Rect, ny: u32) {
             // Offset every other cell
             if modulus(i_x as f32 + i_y as f32, 2.) == 0. {
                 i_x += 1;
+                if i_x >= nx {
+                    break;
+                }
             }
             let x = lerp(rect.left()..=rect.right(), i_x as f32 / nx as f32);
             let cell_top = rect.top() + i_y as f32 * checker_size;
@@ -83,28 +86,6 @@ fn background_checkers(painter: &Painter, rect: Rect, ny: u32) {
         }
     }
     painter.add(Shape::mesh(mesh));
-}
-
-/// Show a color with background checkers to demonstrate transparency (if any).
-fn show_srgba_unmultiplied(ui: &mut Ui, srgba: [u8; 4], desired_size: Vec2) -> Response {
-    let (rect, response) = ui.allocate_at_least(desired_size, Sense::hover());
-    if ui.is_rect_visible(rect) {
-        show_srgba_unmultiplied_at(ui.painter(), srgba, rect);
-    }
-    response
-}
-
-/// Show a color with background checkers to demonstrate transparency (if any).
-fn show_srgba_unmultiplied_at(painter: &Painter, [r, g, b, a]: [u8; 4], rect: Rect) {
-    if a == 255 {
-        painter.rect_filled(rect, 0.0, Color32::from_rgb(r, g, b));
-    } else {
-        background_checkers(painter, rect, 4);
-        let left = Rect::from_min_max(rect.left_top(), rect.center_bottom());
-        let right = Rect::from_min_max(rect.center_top(), rect.right_bottom());
-        painter.rect_filled(left, 0.0, Color32::from_rgba_unmultiplied(r, g, b, a));
-        painter.rect_filled(right, 0.0, Color32::from_rgb(r, g, b));
-    }
 }
 
 fn color_button(ui: &mut Ui, srgba: [u8; 4], open: bool) -> Response {
@@ -121,7 +102,7 @@ fn color_button(ui: &mut Ui, srgba: [u8; 4], open: bool) -> Response {
         let rect = rect.expand(visuals.expansion);
 
         let stroke_width = 1.0;
-        show_srgba_unmultiplied_at(ui.painter(), srgba, rect.shrink(stroke_width));
+        show_srgba_unmultiplied_at(ui.painter(), srgba, rect.shrink(stroke_width), 3);
 
         let corner_radius = visuals.corner_radius.at_most(2); // Can't do more rounding because the background grid doesn't do any rounding
         ui.painter().rect_stroke(
@@ -135,27 +116,30 @@ fn color_button(ui: &mut Ui, srgba: [u8; 4], open: bool) -> Response {
     response
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 struct OklchUiState {
     // normalized 0..1
     l: f32,
     c: f32,
     h: f32,
+    a: f32,
 }
 
-fn color_slider_1d_grid(
+pub fn color_slider_1d_grid(
     ui: &mut Ui,
     slider_value: &mut f32,
     slider_value_nearest_color: f32,
     nearest_color: Color32,
-    color_at: impl Fn(f32) -> ColorSample,
+    color_at: impl Fn(f32) -> Oklcha,
     background_color_at: Option<impl Fn(f32) -> Color32>,
     axis_name: &str,
 ) -> Response {
     let desired_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 
+    let mut changed = false;
     if let Some(mpos) = response.interact_pointer_pos() {
+        changed = true;
         *slider_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
     }
 
@@ -171,8 +155,8 @@ fn color_slider_1d_grid(
         let nx = rect.width().max(1.0).round() as usize;
         let ny = rect.height().max(1.0).round() as usize;
 
-        // Fixme: Also dependent on change in l,c,h values, forn now just always rebuild
-        // let rebuild = tex.is_none() || tex.as_ref().unwrap().size() != [nx, ny];
+        // TODO: rebuild when needed. Also dependent on change in l,c,h values. For now just always rebuild
+        // let rebuild = changed || tex.is_none() || tex.as_ref().unwrap().size() != [nx, ny] || slider_value != prev_slider_value;
         let rebuild = true;
 
         background_checkers(ui.painter(), rect, 4);
@@ -183,18 +167,19 @@ fn color_slider_1d_grid(
             // Row-major order as expected by ColorImage
             for _y in 0..ny {
                 for x in 0..nx {
-                    let t = if nx > 1 {
+                    let x_normalized = if nx > 1 {
                         x as f32 / (nx as f32 - 1.0)
                     } else {
                         0.0
                     };
 
-                    let color_sample = color_at(t);
-                    if color_sample.valid {
-                        pixels.push(color_sample.color.r());
-                        pixels.push(color_sample.color.g());
-                        pixels.push(color_sample.color.b());
-                        pixels.push(color_sample.color.a());
+                    let oklch = color_at(x_normalized);
+                    if oklch.is_valid_srgb() {
+                        let color = Color32::from(oklch);
+                        pixels.push(color.r());
+                        pixels.push(color.g());
+                        pixels.push(color.b());
+                        pixels.push(color.a());
                     } else {
                         match background_color_at {
                             None => {
@@ -204,7 +189,7 @@ fn color_slider_1d_grid(
                                 pixels.push(0);
                             }
                             Some(ref bg_color_at) => {
-                                let color = bg_color_at(t);
+                                let color = bg_color_at(x_normalized);
                                 pixels.push(color.r());
                                 pixels.push(color.g());
                                 pixels.push(color.b());
@@ -215,7 +200,7 @@ fn color_slider_1d_grid(
                 }
             }
 
-            let image = egui::ColorImage::from_rgba_unmultiplied([nx, ny], &pixels);
+            let image = egui::ColorImage::from_rgba_premultiplied([nx, ny], &pixels);
 
             match tex.as_mut() {
                 Some(existing) => {
@@ -252,9 +237,8 @@ fn color_slider_1d_grid(
 
         // If marker is not at valid color, show where the projected color would be on the slider
         let x = lerp(rect.left()..=rect.right(), slider_value_nearest_color);
-        let color_sample = color_at(*slider_value);
-        if !color_sample.valid {
-            // let (_, nearest_color) = color_at(slider_value_nearest_color);
+        let oklch = color_at(*slider_value);
+        if !oklch.is_valid_srgb() {
             ui.painter().add(Shape::Rect(RectShape::new(
                 Rect::from_center_size(
                     Pos2 {
@@ -298,129 +282,6 @@ fn color_slider_1d_grid(
     response
 }
 
-/// CPU-rasterized 2D color slider using egui textures.
-fn color_slider_2d_grid(
-    ui: &mut Ui,
-    x_value: &mut f32,
-    y_value: &mut f32,
-    color_at: impl Fn(f32, f32) -> Color32,
-) -> Response {
-    let desired_size = Vec2::splat(ui.spacing().slider_width);
-    let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
-
-    // Handle interaction
-    if let Some(mpos) = response.interact_pointer_pos() {
-        *x_value = remap_clamp(mpos.x, rect.left()..=rect.right(), 0.0..=1.0);
-        *y_value = remap_clamp(mpos.y, rect.bottom()..=rect.top(), 0.0..=1.0);
-    }
-
-    if ui.is_rect_visible(rect) {
-        let size = rect.size();
-
-        // ----------------------------
-        // 1. Retrieve or create texture
-        // ----------------------------
-        let tex_id = egui::Id::new("color_slider_tex");
-
-        let mut tex = ui
-            .data(|d| d.get_temp::<Option<egui::TextureHandle>>(tex_id))
-            .unwrap_or(None);
-
-        let pixels_w = size.x as usize;
-        let pixels_h = size.y as usize;
-
-        let rebuild = tex.is_none() || tex.as_ref().unwrap().size_vec2() != size;
-
-        if rebuild {
-            let mut pixels = Vec::with_capacity(pixels_w * pixels_h * 4);
-
-            for y in 0..pixels_h {
-                let yt = y as f32 / (pixels_h as f32 - 1.0);
-
-                for x in 0..pixels_w {
-                    let xt = x as f32 / (pixels_w as f32 - 1.0);
-
-                    let color = color_at(xt, yt);
-
-                    pixels.push(color.r());
-                    pixels.push(color.g());
-                    pixels.push(color.b());
-                    pixels.push(color.a());
-                }
-            }
-
-            let image = egui::ColorImage::from_rgba_unmultiplied([pixels_w, pixels_h], &pixels);
-
-            if tex.is_none() {
-                tex = Some(ui.ctx().load_texture(
-                    "color_slider_2d",
-                    image,
-                    egui::TextureOptions::LINEAR,
-                ));
-            }
-
-            ui.data_mut(|d| {
-                d.insert_temp(tex_id, tex.clone());
-            });
-        }
-
-        let tex = tex.as_ref().unwrap();
-
-        // ----------------------------
-        // 2. Paint image
-        // ----------------------------
-        ui.painter().image(
-            tex.id(),
-            rect,
-            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-            Color32::WHITE,
-        );
-
-        // ----------------------------
-        // 3. Outline
-        // ----------------------------
-        let visuals = ui.style().interact(&response);
-        ui.painter()
-            .rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
-
-        // ----------------------------
-        // 4. Handle indicator
-        // ----------------------------
-        let x = lerp(rect.left()..=rect.right(), *x_value);
-        let y = lerp(rect.bottom()..=rect.top(), *y_value);
-        let picked_color = color_at(*x_value, *y_value);
-
-        ui.painter().circle(
-            Pos2::new(x, y),
-            rect.width() / 12.0,
-            picked_color,
-            egui::Stroke::new(visuals.fg_stroke.width, contrast_color(picked_color)),
-        );
-    }
-
-    response
-}
-
-/// We use a negative alpha for additive colors within this file (a bit ironic).
-///
-/// We use alpha=0 to mean "transparent".
-fn is_additive_alpha(a: f32) -> bool {
-    a < 0.0
-}
-
-/// What options to show for alpha
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Alpha {
-    /// Set alpha to 1.0, and show no option for it.
-    Opaque,
-
-    /// Only show normal blend options for alpha.
-    OnlyBlend,
-
-    /// Show both blend and additive options.
-    BlendOrAdditive,
-}
-
 pub fn color_slider_2d<T, P>(
     ui: &mut Ui,
     coord: &mut T::Coord,
@@ -432,7 +293,9 @@ where
     T::Coord: Clone + Copy + PartialEq,
     P: ColorProjection<T::Coord> + Clone + PartialEq + Send + Sync + 'static,
 {
-    let desired_size = Vec2::splat(ui.spacing().slider_width);
+    let mut color_changed = false;
+
+    let desired_size = Vec2::splat(ui.spacing().slider_width + 34.);
 
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 
@@ -479,12 +342,11 @@ where
         painter.rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
 
         // Obtain color sample
-        let sample = picker.projection.color_at(*coord);
-        color_is_valid = sample.valid;
+        let oklch = picker.projection.color_at(*coord);
+        color_is_valid = oklch.is_valid_srgb();
 
         // Draw marker
-        let marker_pos = picker.coord_to_pixel(*coord);
-        let (indicator_color, marker_angle) = if sample.valid {
+        let (indicator_color, marker_angle) = if color_is_valid {
             (Color32::WHITE, 45.)
         } else {
             (Color32::WHITE, 0.)
@@ -509,7 +371,7 @@ where
                 color: Color32::BLACK,
             },
         );
-        if sample.valid {
+        if color_is_valid {
             picker.previous_fallback = Some(*coord);
         } else {
             let fallback_coord = if viewport_contains_picked_color {
@@ -570,6 +432,7 @@ where
             };
 
             *coord = picker.pixel_to_coord(local);
+            color_changed = true;
         }
     }
 
@@ -577,7 +440,8 @@ where
         d.insert_temp(picker_id, picker);
     });
 
-    (response, viewport_contains_picked_color || color_is_valid)
+    // (response, viewport_contains_picked_color || color_is_valid)
+    (response, color_changed)
 }
 
 pub fn draw_inward_triangles(
@@ -604,7 +468,6 @@ pub fn draw_inward_triangles(
         let angle = base_angle + offset + step * i as f32;
 
         let outward = Vec2::new(angle.cos(), angle.sin());
-        let inward = -outward;
 
         // Inner tip sits exactly radius units from center.
         let tip = center + outward * radius;
@@ -645,44 +508,6 @@ pub fn draw_triangle(
     painter.add(Shape::convex_polygon(vec![tip, left, right], fill, stroke));
 }
 
-#[derive(Clone)]
-struct CachedPickerCartesian {
-    stable_value_bits: u32,
-    size: Vec2,
-    viewport_bounds: [f32; 4],
-    texture: egui::TextureHandle,
-    coordinates: Arc<[Pos2]>,
-    border_positions_px: Arc<[Pos2]>,
-    prev_fallback_color_pos: Option<Pos2>,
-}
-
-struct Pos {
-    x: usize,
-    y: usize,
-}
-
-pub fn tex_coord_to_lch(
-    coord: Pos,
-    width: usize,
-    height: usize,
-    stable_value: f32,
-    invert_radial_value: bool,
-    // your existing mapping function reused here
-    to_lch: impl Fn(f32, f32, f32) -> Option<Oklch>,
-) -> Option<Oklch> {
-    let x = coord.x;
-    let y = coord.y;
-
-    // normalize to 0..1 texture space
-    let u = x as f32 / (width as f32 - 1.0);
-    let v = y as f32 / (height as f32 - 1.0);
-
-    let angle = u;
-    let radius = if invert_radial_value { 1.0 - v } else { v };
-
-    to_lch(angle, radius, stable_value)
-}
-
 #[derive(Debug, Clone)]
 enum OKLabPlotType {
     StableLightness,
@@ -690,47 +515,277 @@ enum OKLabPlotType {
     StableHue,
 }
 
-fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool, Color32) {
-    let current_color_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
+pub fn color_edit_button_oklch(ui: &mut Ui, color: &mut Oklcha, widget_width: f32) -> Response {
+    let popup_id = ui.auto_id_with("popup");
+    let open = Popup::is_id_open(ui.ctx(), popup_id);
+    let mut button_response = color_button(ui, color.to_srgba_unmultiplied(), open);
+    if ui.style().explanation_tooltips {
+        button_response = button_response.on_hover_text("Click to edit color");
+    }
 
+    Popup::menu(&button_response)
+        .id(popup_id)
+        .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.spacing_mut().slider_width = widget_width;
+            if color_picker_oklcha_2d(ui, color, widget_width, false) {
+                button_response.mark_changed();
+            }
+        });
+
+    button_response
+}
+
+pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Oklcha, widget_width: f32) -> Response {
+    let popup_id = ui.auto_id_with("popup");
+    let open = Popup::is_id_open(ui.ctx(), popup_id);
+    let mut button_response = color_button(ui, color.to_srgba_unmultiplied(), open);
+    if ui.style().explanation_tooltips {
+        button_response = button_response.on_hover_text("Click to edit color");
+    }
+
+    Popup::menu(&button_response)
+        .id(popup_id)
+        .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.spacing_mut().slider_width = widget_width;
+            if color_picker_oklcha_2d(ui, color, widget_width, true) {
+                button_response.mark_changed();
+            }
+        });
+
+    button_response
+}
+
+pub fn color_text_fields(ui: &mut Ui, color: Color32, widget_width: f32) -> (bool, Color32) {
+    let mut changed = false;
+    let mut new_color = color.clone();
+
+    // Hex text field
+    let mut srgba = color.to_srgba_unmultiplied();
+    let mut srgb = [srgba[0], srgba[1], srgba[2]];
+    let alpha = srgba[3];
+    ui.horizontal(|ui| {
+        if HexEdit::new(&mut srgb).ui(ui, widget_width + 34.0) {
+            new_color = Color32::from_rgba_unmultiplied(srgb[0], srgb[1], srgb[2], alpha);
+            changed = true;
+        }
+    });
+
+    // RGB text fields
+    ui.horizontal(|ui| {
+        if RgbEdit::new(&mut srgb).ui(ui, widget_width + 34.) {
+            new_color = Color32::from_rgba_unmultiplied(srgb[0], srgb[1], srgb[2], alpha);
+            changed = true;
+        }
+    });
+
+    // HSV text fields
+    ui.horizontal(|ui| {
+        let mut hsv = color32_to_hsv(color.to_opaque());
+        if HsvEdit::new(&mut hsv).ui(ui, widget_width + 34.) {
+            let rgba = hsv_to_color32(hsv).to_array();
+            new_color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], alpha);
+            changed = true;
+        }
+    });
+
+    // Oklab text fields
+    ui.horizontal(|ui| {
+        let mut oklab = Oklaba::from(color.to_opaque());
+        if OklabEdit::new(&mut oklab).ui(ui, widget_width + 34.) {
+            let color = oklab_to_color32(oklab);
+            let rgba = if oklab.is_valid_srgb() {
+                color.to_srgba_unmultiplied()
+            } else {
+                // TODO: fallback? Or implement an oklab_to_color32_with_chroma_fallback?
+                color.to_srgba_unmultiplied()
+            };
+            new_color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], alpha);
+            changed = true;
+        }
+    });
+
+    // Oklch text fields
+    ui.horizontal(|ui| {
+        let mut oklch = color32_to_oklch(color.to_opaque());
+
+        if OklchEdit::new(&mut oklch).ui(ui, widget_width + 34.) {
+            let color = oklch_to_color32(oklch);
+            let rgba = if oklch.is_valid_srgb() {
+                color.to_srgba_unmultiplied()
+            } else {
+                // TODO: fallback? Or implement an oklab_to_color32_with_chroma_fallback?
+                color.to_srgba_unmultiplied()
+            };
+            new_color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], color.a());
+            changed = true;
+        }
+    });
+
+    (changed, new_color)
+}
+
+pub fn oklch_sliders(ui: &mut Ui, selected_color: Oklcha, with_alpha: bool) -> (bool, OklchUiState) {
+    // Recover state from cache
     let state_id = ui.id().with("oklch_ui_state");
-
-    // Todo: base default on color value
-    // Todo: If the color changed beneath us, reset state to match new color
-    let mut state: OklchUiState =
-        ui.data(|d| d.get_temp::<OklchUiState>(state_id))
-            .unwrap_or(OklchUiState {
-                l: 0.5,
-                c: 0.5,
-                h: 0.5,
-            });
-
+    let mut state: OklchUiState = ui.data(|d| d.get_temp::<OklchUiState>(state_id)).unwrap();
+    let original_state = state.clone();
     let l = state.l;
     let c = state.c * 0.325;
-    let h = state.h * std::f32::consts::TAU;
+    let h = state.h * TAU;
 
-    let mut color_sample = oklch_to_color32(lch.clone()); // technically the color from previous frame, but I want to display this above the 2d picker
-    let mut update_color = false;
+    // Lightness slider
+    ui.horizontal(|ui| {
+        color_slider_1d_grid(
+            ui,
+            &mut state.l,
+            selected_color.l,
+            selected_color.into(),
+            |l_mut| Oklcha {
+                l: l_mut,
+                c,
+                h,
+                alpha: 1.0,
+            },
+            None::<fn(f32) -> Color32>,
+            &"lightness",
+        )
+        .on_hover_text("Lightness");
+        DragValue::new(&mut state.l)
+            .prefix("L: ")
+            .speed(0.003)
+            .range(0.0..=1.0)
+            .custom_formatter(|n, _| format!("{n:.03}"))
+            .ui(ui)
+            .on_hover_text("Lightness");
+    });
+
+    // Chroma slider
+    ui.horizontal(|ui| {
+        color_slider_1d_grid(
+            ui,
+            &mut state.c,
+            selected_color.c / 0.325,
+            selected_color.into(),
+            |c_mut| Oklcha {
+                l,
+                c: c_mut * 0.325,
+                h,
+                alpha: 1.0,
+            },
+            None::<fn(f32) -> Color32>,
+            &"chroma",
+        )
+        .on_hover_text("Chroma");
+        let mut chroma_val = state.c * 0.325;
+        DragValue::new(&mut chroma_val)
+            .prefix("C: ")
+            .speed(0.001)
+            .range(0.0..=0.325)
+            .custom_formatter(|n, _| format!("{n:.03}"))
+            .ui(ui)
+            .on_hover_text("Chroma");
+        state.c = chroma_val / 0.325;
+    });
+
+    // Hue slider
+    let determine_hue_slider_colors = |h_mut| {
+        // Define lightness and chroma that exist for all hues
+        let bg_color = oklch_to_color32(Oklcha {
+            l: 0.750,
+            c: 0.127,
+            h: h_mut * std::f32::consts::TAU,
+            alpha: 1.0,
+        });
+        let bg_color = bg_color.blend(Color32::from_black_alpha(40));
+        let color = Color32::from_rgba_unmultiplied(bg_color.r(), bg_color.g(), bg_color.b(), 210);
+        color
+    };
+    ui.horizontal(|ui| {
+        color_slider_1d_grid(
+            ui,
+            &mut state.h,
+            selected_color.h / std::f32::consts::TAU,
+            selected_color.into(),
+            |h_mut| Oklcha {
+                l: l,
+                c: c,
+                h: h_mut * std::f32::consts::TAU,
+                alpha: 1.0,
+            },
+            Some(determine_hue_slider_colors),
+            &"hue",
+        )
+        .on_hover_text("Hue");
+        let mut hue_val = state.h * 360.;
+        DragValue::new(&mut hue_val)
+            .prefix("H: ")
+            .speed(1.0)
+            .range(0.0..=360.)
+            .custom_formatter(|n, _| format!("{n:.1}"))
+            .ui(ui)
+            .on_hover_text("Hue");
+        state.h = hue_val / 360.;
+    });
+
+    if with_alpha {
+        ui.horizontal(|ui| {
+            color_slider_1d_grid(
+                ui,
+                &mut state.a,
+                selected_color.h / std::f32::consts::TAU,
+                selected_color.into(),
+                |alpha| {
+                    let mut color = selected_color;
+                    color.alpha = alpha;
+                    color
+                },
+                None::<fn(f32) -> Color32>,
+                &"alpha",
+            )
+            .on_hover_text("Transparency (Alpha)");
+            DragValue::new(&mut state.a)
+                .prefix("A: ")
+                .speed(1.0)
+                .range(0.0..=1.0)
+                .custom_formatter(|n, _| format!("{n:.3}"))
+                .ui(ui)
+                .on_hover_text("Transparency (Alpha)");
+        });
+    }
+
+    let state_changed = state != original_state;
+
+    ui.data_mut(|d| {
+        d.insert_temp(state_id, state.clone());
+    });
+
+    (state_changed, state)
+}
+
+pub fn plot_type_selector(ui: &mut Ui) -> (bool, OKLabPlotType) {
+    let mut tab_changed = false;
 
     let mut tab = ui.data(|d| {
         d.get_temp::<OKLabPlotType>(ui.id())
             .unwrap_or(OKLabPlotType::StableHue)
     });
-    let mut tab_switched = false;
+
     ui.horizontal(|ui| {
         if ui
             .selectable_label(matches!(tab, OKLabPlotType::StableHue), "Stable Hue")
             .clicked()
         {
+            tab_changed = true;
             tab = OKLabPlotType::StableHue;
-            tab_switched = true;
         }
         if ui
             .selectable_label(matches!(tab, OKLabPlotType::StableChroma), "Stable Chroma")
             .clicked()
         {
+            tab_changed = true;
             tab = OKLabPlotType::StableChroma;
-            tab_switched = true;
         }
         if ui
             .selectable_label(
@@ -739,108 +794,8 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
             )
             .clicked()
         {
+            tab_changed = true;
             tab = OKLabPlotType::StableLightness;
-            tab_switched = true;
-        }
-    });
-
-    let color = color_sample.color;
-
-    let mut r = color.r();
-    let mut g = color.g();
-    let mut b = color.b();
-    let mut a = color.a();
-    let mut rgb = [r, g, b];
-
-    // Hex text field
-    ui.horizontal(|ui| {
-        if HexEdit::new(&mut rgb).ui(ui, COLOR_SLIDER_WIDTH + 50.0) {
-            let new_color = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], a);
-
-            update_color = true;
-            color_sample.color = new_color;
-            *lch = color32_to_oklch(color_sample.color);
-            state.l = lch.l;
-            state.c = lch.c / 0.325;
-            state.h = lch.h / std::f32::consts::TAU;
-        }
-    });
-
-    // RGB text fields
-    ui.horizontal(|ui| {
-        if RgbEdit::new(&mut rgb).ui(ui, COLOR_SLIDER_WIDTH + 50.) {
-            let new_color = Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], a);
-            update_color = true;
-            color_sample.color = new_color;
-            *lch = color32_to_oklch(color_sample.color);
-            state.l = lch.l;
-            state.c = lch.c / 0.325;
-            state.h = lch.h / std::f32::consts::TAU;
-        }
-    });
-
-    // HSV text fields
-    ui.horizontal(|ui| {
-        let mut hsv = color32_to_hsv(color);
-        if HsvEdit::new(&mut hsv).ui(ui, COLOR_SLIDER_WIDTH + 50.) {
-            let rgba = hsv_to_color32(hsv).to_array();
-            let new_color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], a);
-            update_color = true;
-            color_sample.color = new_color;
-            *lch = color32_to_oklch(color_sample.color);
-            state.l = lch.l;
-            state.c = lch.c / 0.325;
-            state.h = lch.h / std::f32::consts::TAU;
-        }
-    });
-
-    // Oklab text fields
-    ui.horizontal(|ui| {
-        let mut lab = oklch_to_oklab(*lch);
-
-        if OklabEdit::new(&mut lab).ui(ui, COLOR_SLIDER_WIDTH + 50.) {
-            let (_, linear) = oklab_to_linear_srgb(lab);
-            let srgb = linear_srgb_to_srgb(linear);
-
-            let new_color = Color32::from_rgba_unmultiplied(
-                (srgb.r * 255.0).round() as u8,
-                (srgb.g * 255.0).round() as u8,
-                (srgb.b * 255.0).round() as u8,
-                a,
-            );
-
-            update_color = true;
-            color_sample.color = new_color;
-            *lch = oklab_to_oklch(lab);
-
-            state.l = lch.l;
-            state.c = lch.c / 0.325;
-            state.h = lch.h / std::f32::consts::TAU;
-        }
-    });
-
-    // Oklch text fields
-    ui.horizontal(|ui| {
-        let mut oklch = *lch;
-
-        if OklchEdit::new(&mut oklch).ui(ui, COLOR_SLIDER_WIDTH + 50.) {
-            let (_, linear) = oklab_to_linear_srgb(oklch_to_oklab(oklch));
-            let srgb = linear_srgb_to_srgb(linear);
-
-            let new_color = Color32::from_rgba_unmultiplied(
-                (srgb.r * 255.0).round() as u8,
-                (srgb.g * 255.0).round() as u8,
-                (srgb.b * 255.0).round() as u8,
-                a,
-            );
-
-            update_color = true;
-            color_sample.color = new_color;
-            *lch = oklch;
-
-            state.l = lch.l;
-            state.c = lch.c / 0.325;
-            state.h = lch.h / std::f32::consts::TAU;
         }
     });
 
@@ -848,16 +803,24 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
         d.insert_temp(ui.id(), tab.clone());
     });
 
-    if tab_switched {
-        state.l = lch.l;
-        state.c = lch.c / 0.325;
-        state.h = lch.h / std::f32::consts::TAU;
-    }
+    (tab_changed, tab)
+}
 
-    show_srgba_unmultiplied(ui, color_sample.color.to_array(), current_color_size)
-        .on_hover_text("Selected color");
+pub fn color_picker_panel_oklch_2d(ui: &mut Ui, plot_type: OKLabPlotType) -> (bool, Oklcha) {
+    // Recover state from cache
+    let state_id = ui.id().with("oklch_ui_state");
+    let mut state: OklchUiState =
+        ui.data(|d| d.get_temp::<OklchUiState>(state_id))
+            .unwrap_or(OklchUiState {
+                l: 0.5,
+                c: 0.3,
+                h: 0.0,
+                a: 1.0,
+            });
 
-    let (new_color_, update_color_) = match tab {
+    let state_original = state.clone();
+
+    let (mut new_color, color_changed) = match plot_type {
         OKLabPlotType::StableHue => {
             let projection = StableHueProjection {
                 hue: state.h * std::f32::consts::TAU,
@@ -875,8 +838,8 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
                 ui, &mut coord, projection, "StableHueColorPicker"
             );
 
-            state.c = coord.x;
-            state.l = coord.y;
+            state.c = coord.x.min(1.0);
+            state.l = coord.y.min(1.0);
 
             let picker_id = ui.id().with("StableHueColorPicker");
 
@@ -902,8 +865,8 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
                 "StableChromaColorPicker",
             );
 
-            state.h = coord.angle / std::f32::consts::TAU;
-            state.l = 1.0 - coord.radius;
+            state.h = coord.angle.rem_euclid(360.0) / std::f32::consts::TAU;
+            state.l = 1.0 - coord.radius.min(1.0);
 
             let picker_id = ui.id().with("StableChromaColorPicker");
 
@@ -930,8 +893,8 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
                     "StableLightnessColorPicker",
                 );
 
-            state.h = coord.angle / std::f32::consts::TAU;
-            state.c = coord.radius;
+            state.h = (coord.angle / std::f32::consts::TAU).rem_euclid(360.0);
+            state.c = coord.radius.min(1.0);
 
             let picker_id = ui.id().with("StableLightnessColorPicker");
 
@@ -943,212 +906,159 @@ fn color_picker_oklch_2d(ui: &mut Ui, lch: &mut Oklch, alpha: &mut f32) -> (bool
         }
     };
 
-    if update_color_ {
-        update_color = true;
-        color_sample.color = new_color_;
-        *lch = color32_to_oklch(new_color_);
+    if color_changed {
+        ui.data_mut(|d| {
+            d.insert_temp(state_id, state);
+        });
+    } else {
+        // Note: We put back the original state in case the user did not click the
+        //       viewport to prevent rounding of state to the nearest pixel in case
+        //       state was set before by a different widget.
+        ui.data_mut(|d| {
+            d.insert_temp(state_id, state_original);
+        });
     }
 
-    // --- Lightness slider (0..1) ---
-    ui.horizontal(|ui| {
-        color_slider_1d_grid(
-            ui,
-            &mut state.l,
-            lch.l,
-            color_sample.color,
-            |l_mut| oklch_to_color32(Oklch { l: l_mut, c, h }),
-            None::<fn(f32) -> Color32>,
-            &"lightness",
-        )
-        .on_hover_text("Lightness");
-        DragValue::new(&mut state.l)
-            .prefix("L: ")
-            .speed(0.003)
-            .range(0.0..=1.0)
-            .custom_formatter(|n, _| format!("{n:.03}"))
-            .ui(ui)
-            .on_hover_text("Lightness");
-    });
+    (color_changed, new_color)
+}
 
-    // --- Chroma slider ---
-    ui.horizontal(|ui| {
-        color_slider_1d_grid(
-            ui,
-            &mut state.c,
-            lch.c / 0.325,
-            color_sample.color,
-            |c_mut| {
-                oklch_to_color32(Oklch {
-                    l,
-                    c: c_mut * 0.325,
-                    h,
-                })
-            },
-            None::<fn(f32) -> Color32>,
-            &"chroma",
-        )
-        .on_hover_text("Chroma");
-        let mut chroma_val = state.c * 0.325;
-        DragValue::new(&mut chroma_val)
-            .prefix("C: ")
-            .speed(0.001)
-            .range(0.0..=0.325)
-            .custom_formatter(|n, _| format!("{n:.03}"))
-            .ui(ui)
-            .on_hover_text("Chroma");
-        state.c = chroma_val / 0.325;
-    });
-
-    // --- Hue slider ---
-    let determine_hue_slider_colors = |h_mut| {
-        // Define lightness and chroma that exist for all hues
-        let bg_color_sample = oklch_to_color32(Oklch {
-            l: 0.750,
-            c: 0.127,
-            h: h_mut * std::f32::consts::TAU,
-        });
-        let bg_color = bg_color_sample.color.blend(Color32::from_black_alpha(40));
-        let color = Color32::from_rgba_unmultiplied(bg_color.r(), bg_color.g(), bg_color.b(), 210);
-        color
-    };
-    ui.horizontal(|ui| {
-        color_slider_1d_grid(
-            ui,
-            &mut state.h,
-            lch.h / std::f32::consts::TAU,
-            color_sample.color,
-            |h_mut| {
-                oklch_to_color32(Oklch {
-                    l: l,
-                    c: c,
-                    h: h_mut * std::f32::consts::TAU,
-                })
-            },
-            Some(determine_hue_slider_colors),
-            &"hue",
-        )
-        .on_hover_text("Hue");
-        let mut hue_val = state.h * 360.;
-        DragValue::new(&mut hue_val)
-            .prefix("H: ")
-            .speed(1.0)
-            .range(0.0..=360.)
-            .custom_formatter(|n, _| format!("{n:.1}"))
-            .ui(ui)
-            .on_hover_text("Hue");
-        state.h = hue_val / 360.;
-    });
-
+pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Oklcha, widget_width: f32, with_alpha: bool) -> bool {
+    let state_id = ui.id().with("oklch_ui_state");
+    let state: OklchUiState =
+        ui.data(|d| d.get_temp::<OklchUiState>(state_id))
+            .unwrap_or(OklchUiState {
+                l: color.l,
+                c: color.c / 0.325,
+                h: color.h / TAU,
+                a: color.alpha,
+            });
     ui.data_mut(|d| {
         d.insert_temp(state_id, state);
     });
 
-    // TODO: Add alpha slider?
+    let (tab_changed, plot_type) = plot_type_selector(ui);
 
-    (update_color, color_sample.color)
-}
+    let current_color_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
+    show_srgba_unmultiplied(ui, color.to_srgba_unmultiplied(), current_color_size, 3)
+        .on_hover_text("Selected color");
 
-/// Shows 4 `DragValue` widgets to be used to edit the RGBA u8 values.
-/// Alpha's `DragValue` is hidden when `Alpha::Opaque`.
-///
-/// Returns `true` on change.
-fn srgba_edit_ui(ui: &mut Ui, [r, g, b, a]: &mut [u8; 4], alpha: Alpha) -> bool {
-    let mut edited = false;
+    let (color_changed_in_2d_panel, new_color_opague) = color_picker_panel_oklch_2d(ui, plot_type);
 
-    ui.horizontal(|ui| {
-        if ui
-            .button("📋")
-            .on_hover_text("Click to copy color values")
-            .clicked()
-        {
-            if alpha == Alpha::Opaque {
-                ui.ctx().copy_text(format!("{r}, {g}, {b}"));
-            } else {
-                ui.ctx().copy_text(format!("{r}, {g}, {b}, {a}"));
-            }
-        }
-        edited |= DragValue::new(r).speed(0.5).prefix("R ").ui(ui).changed();
-        edited |= DragValue::new(g).speed(0.5).prefix("G ").ui(ui).changed();
-        edited |= DragValue::new(b).speed(0.5).prefix("B ").ui(ui).changed();
-        if alpha != Alpha::Opaque {
-            edited |= DragValue::new(a).speed(0.5).prefix("A ").ui(ui).changed();
-        }
-    });
+    let (color_changed_by_sliders, new_state) = oklch_sliders(ui, new_color_opague, with_alpha);
 
-    edited
-}
-
-/// Shows 4 `DragValue` widgets to be used to edit the RGBA f32 values.
-/// Alpha's `DragValue` is hidden when `Alpha::Opaque`.
-///
-/// Returns `true` on change.
-fn rgba_edit_ui(ui: &mut Ui, [r, g, b, a]: &mut [f32; 4], alpha: Alpha) -> bool {
-    fn drag_value(ui: &mut Ui, prefix: &str, value: &mut f32) -> Response {
-        DragValue::new(value)
-            .speed(0.003)
-            .prefix(prefix)
-            .range(0.0..=1.0)
-            .custom_formatter(|n, _| format!("{n:.03}"))
-            .ui(ui)
-    }
-
-    let mut edited = false;
-
-    ui.horizontal(|ui| {
-        if ui
-            .button("📋")
-            .on_hover_text("Click to copy color values")
-            .clicked()
-        {
-            if alpha == Alpha::Opaque {
-                ui.ctx().copy_text(format!("{r:.03}, {g:.03}, {b:.03}"));
-            } else {
-                ui.ctx()
-                    .copy_text(format!("{r:.03}, {g:.03}, {b:.03}, {a:.03}"));
-            }
-        }
-
-        edited |= drag_value(ui, "R ", r).changed();
-        edited |= drag_value(ui, "G ", g).changed();
-        edited |= drag_value(ui, "B ", b).changed();
-        if alpha != Alpha::Opaque {
-            edited |= drag_value(ui, "A ", a).changed();
-        }
-    });
-
-    edited
-}
-
-pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Color32) -> Response {
-    let popup_id = ui.auto_id_with("popup");
-    let open = Popup::is_id_open(ui.ctx(), popup_id);
-    let mut button_response = color_button(ui, color.to_srgba_unmultiplied(), open);
-    if ui.style().explanation_tooltips {
-        button_response = button_response.on_hover_text("Click to edit color");
-    }
-
-    Popup::menu(&button_response)
-        .id(popup_id)
-        .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
-        .show(|ui| {
-            ui.spacing_mut().slider_width = COLOR_SLIDER_WIDTH;
-            if color_picker_oklcha_2d(ui, color) {
-                button_response.mark_changed();
-            }
-        });
-
-    button_response
-}
-
-pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32) -> bool {
-    let mut new_lch = color32_to_oklch(*color);
-    let mut new_alpha = color.a() as f32 / 255.0;
-
-    let (update_color, new_color) = color_picker_oklch_2d(ui, &mut new_lch, &mut new_alpha);
-
-    if update_color {
+    if color_changed_in_2d_panel | tab_changed {
+        let mut new_color = new_color_opague.clone();
+        new_color.alpha = new_state.a;
         *color = new_color;
     }
+    if color_changed_by_sliders {
+        let oklch = Oklcha {
+            l: new_state.l,
+            c: new_state.c * 0.325,
+            h: new_state.h * std::f32::consts::TAU,
+            alpha: new_state.a,
+        };
+        if oklch.is_valid_srgb() {
+            *color = oklch;
+        } else {
+            // TODO: Fallback color using 2d panel
+            let mut new_color = new_color_opague.clone();
+            new_color.alpha = new_state.a;
+            *color = new_color;
+        }
+    }
 
-    update_color
+    let (color_changed_by_text_field, new_color_from_text) =
+        color_text_fields(ui, Color32::from(new_color_opague), widget_width);
+    if color_changed_by_text_field {
+        // Also update state indicators when color changed from direct text inserts
+        let state_id = ui.id().with("oklch_ui_state");
+        let lch = color32_to_oklch(new_color_from_text);
+        let state = OklchUiState {
+            l: lch.l,
+            c: lch.c / 0.325,
+            h: lch.h / std::f32::consts::TAU,
+            a: new_state.a,
+        };
+        let rgba = new_color_from_text.to_array();
+        *color =
+            Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], (new_state.a * 255.) as u8)
+                .into();
+        ui.data_mut(|d| {
+            d.insert_temp(state_id, state);
+        });
+    };
+
+    let color_changed = color_changed_in_2d_panel
+        | color_changed_by_sliders
+        | color_changed_by_text_field
+        | tab_changed;
+
+    color_changed
+}
+
+/// Show a color with background checkers to demonstrate transparency (if any).
+pub fn show_color(ui: &mut Ui, color: impl Into<Color32>, desired_size: Vec2) -> Response {
+    show_color32(ui, color.into(), desired_size)
+}
+
+fn show_color32(ui: &mut Ui, color: Color32, desired_size: Vec2) -> Response {
+    let (rect, response) = ui.allocate_at_least(desired_size, Sense::hover());
+    if ui.is_rect_visible(rect) {
+        show_color_at(ui.painter(), color, rect, 3);
+    }
+    response
+}
+
+/// Show a color with background checkers to demonstrate transparency (if any).
+pub fn show_color_at(painter: &Painter, color: Color32, rect: Rect, nr_cells_y: u32) {
+    if color.is_opaque() {
+        painter.rect_filled(rect, 0.0, color);
+    } else {
+        // Transparent: how both the transparent and opaque versions of the color
+        background_checkers(painter, rect, nr_cells_y);
+
+        if color == Color32::TRANSPARENT {
+            // There is no opaque version, so just show the background checkers
+        } else {
+            let left = Rect::from_min_max(rect.left_top(), rect.center_bottom());
+            let right = Rect::from_min_max(rect.center_top(), rect.right_bottom());
+            painter.rect_filled(left, 0.0, color);
+            painter.rect_filled(right, 0.0, color.to_opaque());
+        }
+    }
+}
+
+/// Show a color with background checkers to demonstrate transparency (if any).
+/// Based on https://github.com/emilk/egui/pull/8208/changes
+fn show_srgba_unmultiplied(
+    ui: &mut Ui,
+    srgba: [u8; 4],
+    desired_size: Vec2,
+    nr_checkers_y: u32,
+) -> Response {
+    let (rect, response) = ui.allocate_at_least(desired_size, Sense::hover());
+    if ui.is_rect_visible(rect) {
+        show_srgba_unmultiplied_at(ui.painter(), srgba, rect, nr_checkers_y);
+    }
+    response
+}
+
+/// Show a color with background checkers to demonstrate transparency (if any).
+/// Based on https://github.com/emilk/egui/pull/8208/changes
+fn show_srgba_unmultiplied_at(
+    painter: &Painter,
+    [r, g, b, a]: [u8; 4],
+    rect: Rect,
+    nr_checkers_y: u32,
+) {
+    if a == 255 {
+        painter.rect_filled(rect, 0.0, Color32::from_rgb(r, g, b));
+    } else {
+        background_checkers(painter, rect, nr_checkers_y);
+        let left = Rect::from_min_max(rect.left_top(), rect.center_bottom());
+        let right = Rect::from_min_max(rect.center_top(), rect.right_bottom());
+        painter.rect_filled(left, 0.0, Color32::from_rgba_unmultiplied(r, g, b, a));
+        painter.rect_filled(right, 0.0, Color32::from_rgb(r, g, b));
+    }
 }
