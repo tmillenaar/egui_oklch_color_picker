@@ -2,6 +2,8 @@
 
 use crate::oklaba::*;
 use crate::oklcha::*;
+use crate::ColorSample;
+use egui::Color32;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub struct LinearSrgb {
@@ -91,7 +93,7 @@ pub fn oklab_to_linear_srgb(c: Oklaba) -> (bool, LinearSrgb) {
     (is_pure_conversion, clamped_color)
 }
 
-pub fn oklab_to_oklch(c: Oklaba) -> Oklch {
+pub fn oklab_to_oklch(c: Oklaba) -> Oklcha {
     // Note: Using fast_math::atan2, the maximum absolute error across all f32s is less than 0.0038.
     //       This is quite fine for the visualization of the color in relation to an angle.
     //       Since this calculation is in a hot loop, we benefit significantly from the faster atan2.
@@ -100,14 +102,15 @@ pub fn oklab_to_oklch(c: Oklaba) -> Oklch {
     if new_hue < 0.0 {
         new_hue += std::f32::consts::TAU;
     };
-    Oklch {
+    Oklcha {
         l: c.l,
         c: c.a.hypot(c.b),
         h: new_hue,
+        alpha: c.alpha,
     }
 }
 
-pub fn oklch_to_oklab(c: Oklch) -> Oklaba {
+pub fn oklch_to_oklab(c: Oklcha) -> Oklaba {
     let (sin_h, cos_h) = c.h.sin_cos(); // Generates one combined assembly instruction if supported by hardware
     Oklaba {
         l: c.l,
@@ -124,7 +127,7 @@ pub struct Hsv {
     pub v: f32, // 0..100
 }
 
-pub fn color32_to_hsv(color: crate::Color32) -> Hsv {
+pub fn color32_to_hsv(color: Color32) -> Hsv {
     let [r, g, b, _] = color.to_array();
 
     let r = r as f32 / 255.0;
@@ -156,7 +159,7 @@ pub fn color32_to_hsv(color: crate::Color32) -> Hsv {
     }
 }
 
-pub fn hsv_to_color32(hsv: Hsv) -> crate::Color32 {
+pub fn hsv_to_color32(hsv: Hsv) -> Color32 {
     let h = hsv.h.rem_euclid(360.0);
     let s = hsv.s / 100.0;
     let v = hsv.v / 100.0;
@@ -174,9 +177,45 @@ pub fn hsv_to_color32(hsv: Hsv) -> crate::Color32 {
         _ => (c, 0.0, x),
     };
 
-    crate::Color32::from_rgb(
+    Color32::from_rgb(
         ((r + m) * 255.0).round() as u8,
         ((g + m) * 255.0).round() as u8,
         ((b + m) * 255.0).round() as u8,
     )
+}
+
+
+pub fn color32_to_oklab(color: Color32) -> Oklaba {
+    let [r, g, b, _] = color.to_array();
+
+    linear_srgb_to_oklab(srgb_to_linear_srgb(Srgb {
+        r: r as f32 / 255.0,
+        g: g as f32 / 255.0,
+        b: b as f32 / 255.0,
+    }))
+}
+
+pub fn oklab_to_color32(c: Oklaba) -> ColorSample {
+    let (is_valid, linear) = oklab_to_linear_srgb(c);
+
+    let srgb = linear_srgb_to_srgb(linear);
+
+    let color = Color32::from_rgb(
+        (srgb.r * 255.0) as u8,
+        (srgb.g * 255.0) as u8,
+        (srgb.b * 255.0) as u8,
+    );
+
+    ColorSample {
+        valid: is_valid,
+        color,
+    }
+}
+
+pub fn oklch_to_color32(c: Oklcha) -> ColorSample {
+    oklab_to_color32(oklch_to_oklab(c))
+}
+
+pub fn color32_to_oklch(color: Color32) -> Oklcha {
+    oklab_to_oklch(color32_to_oklab(color))
 }

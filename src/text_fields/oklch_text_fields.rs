@@ -1,10 +1,11 @@
 use crate::conversions::*;
+use crate::oklcha::*;
 use crate::text_fields::editable_text_field::*;
 use crate::ui_extras::copy_icon::*;
 
 use egui::*;
 
-fn parse_oklch(text: &str) -> Option<Oklch> {
+fn parse_oklch(text: &str) -> Option<Oklcha> {
     let text = text
         .trim()
         .trim_matches(|c| matches!(c, '(' | ')' | '[' | ']' | '{' | '}'));
@@ -27,15 +28,15 @@ fn parse_oklch(text: &str) -> Option<Oklch> {
         .to_radians()
         .rem_euclid(std::f32::consts::TAU);
 
-    Some(Oklch { l, c, h })
+    Some(Oklcha { l, c, h, alpha: 1.0 })
 }
 
 pub struct OklchEdit<'a> {
-    pub oklch: &'a mut Oklch,
+    pub oklch: &'a mut Oklcha,
 }
 
 impl<'a> OklchEdit<'a> {
-    pub fn new(oklch: &'a mut Oklch) -> Self {
+    pub fn new(oklch: &'a mut Oklcha) -> Self {
         Self { oklch }
     }
 
@@ -88,7 +89,7 @@ impl<'a> OklchEdit<'a> {
             0 => &mut self.oklch.l,
             1 => &mut self.oklch.c,
             2 => &mut self.oklch.h,
-            _ => unreachable!("Oklch does not have a 4th component"),
+            _ => unreachable!("Oklch does not have a 4th component, alpha is treated separately"),
         };
 
         let (_, edit) = editable_text_field(ui, id, label, text, 38.);

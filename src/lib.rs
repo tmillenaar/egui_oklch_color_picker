@@ -211,7 +211,7 @@ pub fn color_slider_1d_grid(
                         "color_slider_1d",
                         image,
                         egui::TextureOptions::LINEAR,
-                    ));
+                ));
                 }
             }
 
@@ -630,7 +630,7 @@ pub fn oklch_sliders(ui: &mut Ui, fallback_color: Color32) -> (bool, OklchUiStat
             &mut state.l,
             lch.l,
             fallback_color,
-            |l_mut| oklch_to_color32(Oklch { l: l_mut, c, h }),
+            |l_mut| oklch_to_color32(Oklcha { l: l_mut, c, h, alpha: 1.0 }),
             None::<fn(f32) -> Color32>,
             &"lightness",
         )
@@ -652,10 +652,11 @@ pub fn oklch_sliders(ui: &mut Ui, fallback_color: Color32) -> (bool, OklchUiStat
             lch.c / 0.325,
             fallback_color,
             |c_mut| {
-                oklch_to_color32(Oklch {
+                oklch_to_color32(Oklcha {
                     l,
                     c: c_mut * 0.325,
                     h,
+                    alpha: 1.0
                 })
             },
             None::<fn(f32) -> Color32>,
@@ -676,10 +677,11 @@ pub fn oklch_sliders(ui: &mut Ui, fallback_color: Color32) -> (bool, OklchUiStat
     // Hue slider
     let determine_hue_slider_colors = |h_mut| {
         // Define lightness and chroma that exist for all hues
-        let bg_color_sample = oklch_to_color32(Oklch {
+        let bg_color_sample = oklch_to_color32(Oklcha {
             l: 0.750,
             c: 0.127,
             h: h_mut * std::f32::consts::TAU,
+            alpha: 1.0
         });
         let bg_color = bg_color_sample.color.blend(Color32::from_black_alpha(40));
         let color = Color32::from_rgba_unmultiplied(bg_color.r(), bg_color.g(), bg_color.b(), 210);
@@ -799,7 +801,7 @@ pub fn plot_type_selector(ui: &mut Ui) -> (bool, OKLabPlotType) {
     (tab_changed, tab)
 }
 
-pub fn color_picker_panel_oklch_2d(ui: &mut Ui, plot_type: OKLabPlotType) -> (bool, Color32) {
+pub fn color_picker_panel_oklch_2d(ui: &mut Ui, plot_type: OKLabPlotType) -> (bool, Oklcha) {
     // Recover state from cache
     let state_id = ui.id().with("oklch_ui_state");
     let mut state: OklchUiState =
@@ -915,7 +917,7 @@ pub fn color_picker_panel_oklch_2d(ui: &mut Ui, plot_type: OKLabPlotType) -> (bo
     (color_changed, new_color)
 }
 
-pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32, widget_width: f32) -> bool {
+pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Oklcha, widget_width: f32) -> bool {
     let color_opague = color.to_opaque();
     let (tab_changed, plot_type) = plot_type_selector(ui);
 
@@ -932,10 +934,11 @@ pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Color32, widget_width: f3
             Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], (new_state.a * 255.) as u8);
     }
     if color_changed_by_sliders {
-        let color_sample = oklch_to_color32(Oklch {
+        let color_sample = oklch_to_color32(Oklcha {
             l: new_state.l,
             c: new_state.c * 0.325,
             h: new_state.h * std::f32::consts::TAU,
+            alpha: color.alpha();
         });
         if color_sample.valid {
             *color = Color32::from_rgba_unmultiplied(

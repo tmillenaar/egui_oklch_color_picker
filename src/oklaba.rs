@@ -1,6 +1,6 @@
-use crate::{
-    Color32, Rgba, gamma_u8_from_linear_f32, linear_f32_from_gamma_u8, linear_u8_from_linear_f32,
-};
+use crate::{Color32, Rgba};
+use crate::ecolor::{linear_f32_from_gamma_u8,gamma_u8_from_linear_f32, linear_u8_from_linear_f32};
+use crate::conversions::*;
 
 /// Oklab + alpha.
 ///
@@ -28,16 +28,6 @@ impl Oklaba {
     //------------------------------------------------------------------------
     // Constructors
     //------------------------------------------------------------------------
-
-    #[inline]
-    pub fn from_oklab(oklab: Oklab) -> Self {
-        Self {
-            l: oklab.l,
-            a: oklab.a,
-            b: oklab.b,
-            alpha: 1.0,
-        }
-    }
 
     #[inline]
     pub fn from_srgba_unmultiplied([r, g, b, a]: [u8; 4]) -> Self {
@@ -120,22 +110,13 @@ impl Oklaba {
     //------------------------------------------------------------------------
 
     #[inline]
-    pub fn to_oklab(self) -> Oklab {
-        Oklab {
-            l: self.l,
-            a: self.a,
-            b: self.b,
-        }
-    }
-
-    #[inline]
     pub fn to_opaque(self) -> Self {
         Self { alpha: 1.0, ..self }
     }
 
     #[inline]
     pub fn to_rgb(self) -> [f32; 3] {
-        let (_, rgb) = oklab_to_linear_srgb(self.to_oklab());
+        let (_, rgb) = oklab_to_linear_srgb(self);
 
         [rgb.r, rgb.g, rgb.b]
     }
@@ -187,20 +168,6 @@ impl Oklaba {
     }
 }
 
-impl From<Oklab> for Oklaba {
-    #[inline]
-    fn from(oklab: Oklab) -> Self {
-        Self::from_oklab(oklab)
-    }
-}
-
-impl From<Oklaba> for Oklab {
-    #[inline]
-    fn from(oklaba: Oklaba) -> Self {
-        oklaba.to_oklab()
-    }
-}
-
 impl From<Oklaba> for Rgba {
     #[inline]
     fn from(oklaba: Oklaba) -> Self {
@@ -211,7 +178,7 @@ impl From<Oklaba> for Rgba {
 impl From<Rgba> for Oklaba {
     #[inline]
     fn from(rgba: Rgba) -> Self {
-        Self::from_rgba_premultiplied(rgba.0[0], rgba.0[1], rgba.0[2], rgba.0[3])
+        Self::from_rgba_premultiplied(rgba.r(), rgba.g(), rgba.b(), rgba.a())
     }
 }
 
