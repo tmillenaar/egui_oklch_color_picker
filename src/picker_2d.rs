@@ -5,6 +5,7 @@ use egui::*;
 
 use crate::color_projection::*;
 use crate::coordinate_transforms::*;
+use crate::oklcha::*;
 
 pub type StableHuePicker = CachedPicker<CartesianTransform, StableHueProjection>;
 
@@ -168,15 +169,17 @@ where
         let mut pixels = vec![0u8; width * height * 4];
 
         for (i, coord) in self.coordinates.iter().enumerate() {
-            let sample = self.projection.color_at(*coord);
+            let oklch = self.projection.color_at(*coord);
 
-            if sample.valid {
+            if oklch.is_valid_srgb() {
                 let pixel_i = i * 4;
 
-                pixels[pixel_i] = sample.color.r();
-                pixels[pixel_i + 1] = sample.color.g();
-                pixels[pixel_i + 2] = sample.color.b();
-                pixels[pixel_i + 3] = sample.color.a();
+                let srgb = oklch.to_srgb();
+
+                pixels[pixel_i] = srgb[0];
+                pixels[pixel_i + 1] = srgb[1];
+                pixels[pixel_i + 2] = srgb[2];
+                pixels[pixel_i + 3] = 255;
             }
         }
 
@@ -334,18 +337,19 @@ where
         Some(self.pixel_to_coord(border_pixel))
     }
 
-    pub fn nearest_valid_color(&self, coord: T::Coord) -> Color32 {
-        let sample = self.projection.color_at(coord);
+    pub fn nearest_valid_color(&self, coord: T::Coord) -> Oklcha {
+        let mut oklch = self.projection.color_at(coord);
 
-        if sample.valid {
-            return sample.color;
+        if oklch.is_valid_srgb() {
+            return oklch;
         }
 
         let Some(border_coord) = self.nearest_valid_border_coord(coord) else {
-            return Color32::TRANSPARENT;
+            oklch.alpha = 0.;
+            return oklch;
         };
 
-        self.projection.color_at(border_coord).color
+        return self.projection.color_at(border_coord);
     }
 
     pub fn offscreen_indicator(&self, coord: T::Coord) -> Option<(Pos2, f32)> {

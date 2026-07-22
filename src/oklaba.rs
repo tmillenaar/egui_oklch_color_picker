@@ -116,7 +116,9 @@ impl Oklaba {
 
     #[inline]
     pub fn to_rgb(self) -> [f32; 3] {
-        let (_, rgb) = oklab_to_linear_srgb(self);
+        let (is_valid, rgb) = oklab_to_linear_srgb(self);
+
+        // TODO: add fallback on crhoma
 
         [rgb.r, rgb.g, rgb.b]
     }
@@ -166,12 +168,24 @@ impl Oklaba {
     pub fn to_srgba_premultiplied(self) -> [u8; 4] {
         Color32::from(self).to_array()
     }
+
+    #[inline]
+    pub fn is_valid_srgb(&self) -> bool {
+        let (is_valid, rgb) = oklab_to_linear_srgb(*self);
+        is_valid
+    }
 }
 
 impl From<Oklaba> for Rgba {
     #[inline]
     fn from(oklaba: Oklaba) -> Self {
-        Self(oklaba.to_rgba_premultiplied())
+        let rgba_u8 = oklaba.to_rgba_premultiplied();
+        Rgba::from_rgba_premultiplied(
+            rgba_u8[0],
+            rgba_u8[1],
+            rgba_u8[2],
+            rgba_u8[3],
+        )
     }
 }
 

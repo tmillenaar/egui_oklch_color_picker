@@ -2,7 +2,6 @@
 
 use crate::oklaba::*;
 use crate::oklcha::*;
-use crate::ColorSample;
 use egui::Color32;
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
@@ -195,24 +194,22 @@ pub fn color32_to_oklab(color: Color32) -> Oklaba {
     }))
 }
 
-pub fn oklab_to_color32(c: Oklaba) -> ColorSample {
+pub fn oklab_to_color32(c: Oklaba) -> Color32 {
     let (is_valid, linear) = oklab_to_linear_srgb(c);
 
     let srgb = linear_srgb_to_srgb(linear);
+
+    // TODO: todo!("Add fallback based on chroma");
 
     let color = Color32::from_rgb(
         (srgb.r * 255.0) as u8,
         (srgb.g * 255.0) as u8,
         (srgb.b * 255.0) as u8,
     );
-
-    ColorSample {
-        valid: is_valid,
-        color,
-    }
+    color
 }
 
-pub fn oklch_to_color32(c: Oklcha) -> ColorSample {
+pub fn oklch_to_color32(c: Oklcha) -> Color32 {
     oklab_to_color32(oklch_to_oklab(c))
 }
 

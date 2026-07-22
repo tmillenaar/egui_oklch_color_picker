@@ -4,8 +4,8 @@
 mod color_projection;
 mod conversions;
 mod coordinate_transforms;
-mod oklaba;
-mod oklcha;
+pub mod oklaba;
+pub mod oklcha;
 mod picker_2d;
 mod text_fields;
 mod ui_extras;
@@ -131,7 +131,7 @@ pub fn color_slider_1d_grid(
     slider_value: &mut f32,
     slider_value_nearest_color: f32,
     nearest_color: Color32,
-    color_at: impl Fn(f32) -> ColorSample,
+    color_at: impl Fn(f32) -> Oklcha,
     background_color_at: Option<impl Fn(f32) -> Color32>,
     axis_name: &str,
 ) -> Response {
@@ -174,12 +174,13 @@ pub fn color_slider_1d_grid(
                         0.0
                     };
 
-                    let color_sample = color_at(x_normalized);
-                    if color_sample.valid {
-                        pixels.push(color_sample.color.r());
-                        pixels.push(color_sample.color.g());
-                        pixels.push(color_sample.color.b());
-                        pixels.push(color_sample.color.a());
+                    let oklch = color_at(x_normalized);
+                    if oklch.is_valid_srgb() {
+                        let srgb = oklch.to_srgba_unmultiplied();
+                        pixels.push(srgb[0]);
+                        pixels.push(srgb[1]);
+                        pixels.push(srgb[2]);
+                        pixels.push(srgb[3]);
                     } else {
                         match background_color_at {
                             None => {
@@ -237,9 +238,8 @@ pub fn color_slider_1d_grid(
 
         // If marker is not at valid color, show where the projected color would be on the slider
         let x = lerp(rect.left()..=rect.right(), slider_value_nearest_color);
-        let color_sample = color_at(*slider_value);
-        if !color_sample.valid {
-            // let (_, nearest_color) = color_at(slider_value_nearest_color);
+        let oklch = color_at(*slider_value);
+        if !oklch.is_valid_srgb() {
             ui.painter().add(Shape::Rect(RectShape::new(
                 Rect::from_center_size(
                     Pos2 {
@@ -343,11 +343,11 @@ where
         painter.rect_stroke(rect, 0.0, visuals.bg_stroke, egui::StrokeKind::Inside);
 
         // Obtain color sample
-        let sample = picker.projection.color_at(*coord);
-        color_is_valid = sample.valid;
+        let oklch = picker.projection.color_at(*coord);
+        color_is_valid = oklch.is_valid_srgb();
 
         // Draw marker
-        let (indicator_color, marker_angle) = if sample.valid {
+        let (indicator_color, marker_angle) = if color_is_valid {
             (Color32::WHITE, 45.)
         } else {
             (Color32::WHITE, 0.)
@@ -372,7 +372,7 @@ where
                 color: Color32::BLACK,
             },
         );
-        if sample.valid {
+        if color_is_valid {
             picker.previous_fallback = Some(*coord);
         } else {
             let fallback_coord = if viewport_contains_picked_color {
@@ -516,10 +516,10 @@ enum OKLabPlotType {
     StableHue,
 }
 
-pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Color32, widget_width: f32) -> Response {
+pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Oklcha, widget_width: f32) -> Response {
     let popup_id = ui.auto_id_with("popup");
     let open = Popup::is_id_open(ui.ctx(), popup_id);
-    let mut button_response = color_button(ui, *color, open);
+    let mut button_response = color_button(ui, Color32::from(*color), open);
     if ui.style().explanation_tooltips {
         button_response = button_response.on_hover_text("Click to edit color");
     }
@@ -574,12 +574,12 @@ pub fn color_text_fields(ui: &mut Ui, color: Color32, widget_width: f32) -> (boo
     ui.horizontal(|ui| {
         let mut oklab = Oklaba::from(color.to_opaque());
         if OklabEdit::new(&mut oklab).ui(ui, widget_width + 34.) {
-            let color_sample = oklab_to_color32(oklab);
-            let rgba = if color_sample.valid {
-                color_sample.color.to_srgba_unmultiplied()
+            let color = oklab_to_color32(oklab);
+            let rgba = if oklab.is_valid_srgb() {
+                color.to_srgba_unmultiplied()
             } else {
                 // TODO: fallback? Or implement an oklab_to_color32_with_chroma_fallback?
-                color_sample.color.to_srgba_unmultiplied()
+                color.to_srgba_unmultiplied()
             };
             new_color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], alpha);
             changed = true;
@@ -591,12 +591,12 @@ pub fn color_text_fields(ui: &mut Ui, color: Color32, widget_width: f32) -> (boo
         let mut oklch = color32_to_oklch(color.to_opaque());
 
         if OklchEdit::new(&mut oklch).ui(ui, widget_width + 34.) {
-            let color_sample = oklch_to_color32(oklch);
-            let rgba = if color_sample.valid {
-                color_sample.color.to_srgba_unmultiplied()
+            let color = oklch_to_color32(oklch);
+            let rgba = if oklch.is_valid_srgb() {
+                color.to_srgba_unmultiplied()
             } else {
                 // TODO: fallback? Or implement an oklab_to_color32_with_chroma_fallback?
-                color_sample.color.to_srgba_unmultiplied()
+                color.to_srgba_unmultiplied()
             };
             new_color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], color.a());
             changed = true;
@@ -606,16 +606,15 @@ pub fn color_text_fields(ui: &mut Ui, color: Color32, widget_width: f32) -> (boo
     (changed, new_color)
 }
 
-pub fn oklch_sliders(ui: &mut Ui, fallback_color: Color32) -> (bool, OklchUiState) {
+pub fn oklch_sliders(ui: &mut Ui, fallback_color: Oklcha) -> (bool, OklchUiState) {
     // Recover state from cache
     let state_id = ui.id().with("oklch_ui_state");
-    let lch = color32_to_oklch(fallback_color);
     let mut state: OklchUiState =
         ui.data(|d| d.get_temp::<OklchUiState>(state_id))
             .unwrap_or(OklchUiState {
-                l: lch.l,
-                c: lch.c / 0.325,
-                h: lch.h / std::f32::consts::TAU,
+                l: fallback_color.l,
+                c: fallback_color.c / 0.325,
+                h: fallback_color.h / std::f32::consts::TAU,
                 a: 1.0,
             });
     let original_state = state.clone();
@@ -628,9 +627,9 @@ pub fn oklch_sliders(ui: &mut Ui, fallback_color: Color32) -> (bool, OklchUiStat
         color_slider_1d_grid(
             ui,
             &mut state.l,
-            lch.l,
-            fallback_color,
-            |l_mut| oklch_to_color32(Oklcha { l: l_mut, c, h, alpha: 1.0 }),
+            fallback_color.l,
+            fallback_color.into(),
+            |l_mut| Oklcha { l: l_mut, c, h, alpha: 1.0 },
             None::<fn(f32) -> Color32>,
             &"lightness",
         )
@@ -649,15 +648,15 @@ pub fn oklch_sliders(ui: &mut Ui, fallback_color: Color32) -> (bool, OklchUiStat
         color_slider_1d_grid(
             ui,
             &mut state.c,
-            lch.c / 0.325,
-            fallback_color,
+            fallback_color.c / 0.325,
+            fallback_color.into(),
             |c_mut| {
-                oklch_to_color32(Oklcha {
+                Oklcha {
                     l,
                     c: c_mut * 0.325,
                     h,
                     alpha: 1.0
-                })
+                }
             },
             None::<fn(f32) -> Color32>,
             &"chroma",
@@ -677,13 +676,13 @@ pub fn oklch_sliders(ui: &mut Ui, fallback_color: Color32) -> (bool, OklchUiStat
     // Hue slider
     let determine_hue_slider_colors = |h_mut| {
         // Define lightness and chroma that exist for all hues
-        let bg_color_sample = oklch_to_color32(Oklcha {
+        let bg_color = oklch_to_color32(Oklcha {
             l: 0.750,
             c: 0.127,
             h: h_mut * std::f32::consts::TAU,
             alpha: 1.0
         });
-        let bg_color = bg_color_sample.color.blend(Color32::from_black_alpha(40));
+        let bg_color = bg_color.blend(Color32::from_black_alpha(40));
         let color = Color32::from_rgba_unmultiplied(bg_color.r(), bg_color.g(), bg_color.b(), 210);
         color
     };
@@ -691,14 +690,15 @@ pub fn oklch_sliders(ui: &mut Ui, fallback_color: Color32) -> (bool, OklchUiStat
         color_slider_1d_grid(
             ui,
             &mut state.h,
-            lch.h / std::f32::consts::TAU,
-            fallback_color,
+            fallback_color.h / std::f32::consts::TAU,
+            fallback_color.into(),
             |h_mut| {
-                oklch_to_color32(Oklch {
+                Oklcha {
                     l: l,
                     c: c,
                     h: h_mut * std::f32::consts::TAU,
-                })
+                    alpha: 1.0,
+                }
             },
             Some(determine_hue_slider_colors),
             &"hue",
@@ -721,20 +721,13 @@ pub fn oklch_sliders(ui: &mut Ui, fallback_color: Color32) -> (bool, OklchUiStat
             color_slider_1d_grid(
                 ui,
                 &mut state.a,
-                lch.h / std::f32::consts::TAU,
-                fallback_color,
+                fallback_color.h / std::f32::consts::TAU,
+                fallback_color.into(),
                 |alpha| {
                     // let mut rgba = fallback_color.to_srgba_unmultiplied();
-                    let mut rgba = fallback_color.to_array();
-                    ColorSample {
-                        color: Color32::from_rgba_premultiplied(
-                            rgba[0],
-                            rgba[1],
-                            rgba[2],
-                            (alpha * 255.) as u8,
-                        ),
-                        valid: true,
-                    }
+                    let mut color = fallback_color;
+                    color.alpha = alpha;
+                    color
                 },
                 None::<fn(f32) -> Color32>,
                 &"alpha",
@@ -929,38 +922,29 @@ pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Oklcha, widget_width: f32
     let (color_changed_by_sliders, new_state) = oklch_sliders(ui, new_color_opague);
 
     if color_changed_in_2d_panel | tab_changed {
-        let rgba = new_color_opague.to_array();
-        *color =
-            Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], (new_state.a * 255.) as u8);
+        let mut new_color = new_color_opague.clone();
+        new_color.alpha = new_state.a;
+        *color = new_color;
     }
     if color_changed_by_sliders {
-        let color_sample = oklch_to_color32(Oklcha {
+        let oklch = Oklcha {
             l: new_state.l,
             c: new_state.c * 0.325,
             h: new_state.h * std::f32::consts::TAU,
-            alpha: color.alpha();
-        });
-        if color_sample.valid {
-            *color = Color32::from_rgba_unmultiplied(
-                color_sample.color.r(),
-                color_sample.color.g(),
-                color_sample.color.b(),
-                (new_state.a * 255.) as u8,
-            );
+            alpha: color.alpha
+        };
+        if oklch.is_valid_srgb() {
+            *color = oklch;
         } else {
-            // Fallback color using 2d panel
-            let rgba = new_color_opague.to_array();
-            *color = Color32::from_rgba_unmultiplied(
-                rgba[0],
-                rgba[1],
-                rgba[2],
-                (new_state.a * 255.) as u8,
-            );
+            // TODO: Fallback color using 2d panel
+            let mut new_color = new_color_opague.clone();
+            new_color.alpha = new_state.a;
+            *color = new_color;
         }
     }
 
     let (color_changed_by_text_field, new_color_from_text) =
-        color_text_fields(ui, new_color_opague, widget_width);
+        color_text_fields(ui, Color32::from(new_color_opague), widget_width);
     if color_changed_by_text_field {
         // Also update state indicators when color changed from direct text inserts
         let state_id = ui.id().with("oklch_ui_state");
@@ -973,7 +957,7 @@ pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Oklcha, widget_width: f32
         };
         let rgba = new_color_from_text.to_array();
         *color =
-            Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], (new_state.a * 255.) as u8);
+            Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], (new_state.a * 255.) as u8).into();
         ui.data_mut(|d| {
             d.insert_temp(state_id, state);
         });

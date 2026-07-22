@@ -1,4 +1,4 @@
-use crate::oklaba::*;
+use crate::{conversions::oklch_to_oklab, oklaba::*};
 use egui::{Color32, Rgba};
 
 /// Oklch + alpha.
@@ -45,15 +45,7 @@ impl Oklcha {
 
     #[inline]
     pub fn to_oklaba(self) -> Oklaba {
-        let angle = self.h.rem_euclid(1.0) * std::f32::consts::TAU;
-        let (sin_h, cos_h) = angle.sin_cos();
-
-        Oklaba {
-            l: self.l,
-            a: self.c * cos_h,
-            b: self.c * sin_h,
-            alpha: self.alpha,
-        }
+        oklch_to_oklab(self)
     }
 
     #[inline]
@@ -93,6 +85,11 @@ impl Oklcha {
     #[inline]
     pub fn to_srgba_premultiplied(self) -> [u8; 4] {
         Color32::from(self).to_array()
+    }
+
+    #[inline]
+    pub fn is_valid_srgb(&self) -> bool {
+        self.to_oklaba().is_valid_srgb()
     }
 
     //------------------------------------------------------------------------

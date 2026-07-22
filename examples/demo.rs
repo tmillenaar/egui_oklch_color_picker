@@ -1,17 +1,18 @@
 use eframe::egui;
 use egui_oklab::color_edit_button_oklcha;
+use egui_oklab::oklcha::Oklcha;
 
 use std::time::Instant;
 
 struct MyApp {
-    color: egui::Color32,
+    color: Oklcha,
     color_reference: egui::Color32,
 }
 
 impl Default for MyApp {
     fn default() -> Self {
         Self {
-            color: egui::Color32::from_rgb(128, 128, 255),
+            color: egui::Color32::from_rgb(128, 128, 255).into(),
             color_reference: egui::Color32::from_rgb(128, 128, 255),
         }
     }
