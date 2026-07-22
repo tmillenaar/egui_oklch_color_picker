@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui_oklab::color_edit_button_oklcha;
+use egui_oklab::{color_edit_button_oklcha, color_edit_button_oklch};
 use egui_oklab::oklcha::Oklcha;
 
 use std::time::Instant;
@@ -27,6 +27,7 @@ impl eframe::App for MyApp {
             ui.label("Pick a color:");
 
             let widget_width = 350.;
+            color_edit_button_oklch(ui, &mut self.color, widget_width);
             color_edit_button_oklcha(ui, &mut self.color, widget_width);
 
             let mut hsva = self.color_reference.into();
@@ -43,7 +44,6 @@ impl eframe::App for MyApp {
         });
         let frame_time = frame_start.elapsed().as_secs_f64();
         let fps = 1.0 / frame_time;
-        println!("FPS: {:.1}", fps);
     }
 }
 
