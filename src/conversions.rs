@@ -183,7 +183,6 @@ pub fn hsv_to_color32(hsv: Hsv) -> Color32 {
     )
 }
 
-
 pub fn color32_to_oklab(color: Color32) -> Oklaba {
     let [r, g, b, _] = color.to_array();
 

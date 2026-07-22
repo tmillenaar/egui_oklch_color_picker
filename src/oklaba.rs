@@ -1,6 +1,8 @@
-use crate::{Color32, Rgba};
-use crate::ecolor::{linear_f32_from_gamma_u8,gamma_u8_from_linear_f32, linear_u8_from_linear_f32};
 use crate::conversions::*;
+use crate::ecolor::{
+    gamma_u8_from_linear_f32, linear_f32_from_gamma_u8, linear_u8_from_linear_f32,
+};
+use crate::{Color32, Rgba};
 
 /// Oklab + alpha.
 ///
@@ -180,12 +182,7 @@ impl From<Oklaba> for Rgba {
     #[inline]
     fn from(oklaba: Oklaba) -> Self {
         let rgba_u8 = oklaba.to_rgba_premultiplied();
-        Rgba::from_rgba_premultiplied(
-            rgba_u8[0],
-            rgba_u8[1],
-            rgba_u8[2],
-            rgba_u8[3],
-        )
+        Rgba::from_rgba_premultiplied(rgba_u8[0], rgba_u8[1], rgba_u8[2], rgba_u8[3])
     }
 }
 

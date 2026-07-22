@@ -1,4 +1,5 @@
-use crate::{conversions::oklch_to_oklab, oklaba::*};
+use crate::conversions::*;
+use crate::oklaba::*;
 use egui::{Color32, Rgba};
 
 /// Oklch + alpha.
@@ -29,18 +30,7 @@ impl Oklcha {
 
     #[inline]
     pub fn from_oklaba(oklaba: Oklaba) -> Self {
-        let mut h = fast_math::atan2(oklaba.b, oklaba.a);
-
-        if h < 0.0 {
-            h += std::f32::consts::TAU;
-        }
-
-        Self {
-            l: oklaba.l,
-            c: oklaba.a.hypot(oklaba.b),
-            h: h / std::f32::consts::TAU,
-            alpha: oklaba.alpha,
-        }
+        oklab_to_oklch(oklaba)
     }
 
     #[inline]
