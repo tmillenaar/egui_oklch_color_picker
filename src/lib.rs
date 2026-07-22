@@ -519,16 +519,18 @@ pub fn color_edit_button_oklch(ui: &mut Ui, color: &mut Oklcha, widget_width: f3
     let popup_id = ui.auto_id_with("popup");
     let open = Popup::is_id_open(ui.ctx(), popup_id);
     let mut button_response = color_button(ui, color.to_srgba_unmultiplied(), open);
+
     if ui.style().explanation_tooltips {
         button_response = button_response.on_hover_text("Click to edit color");
     }
 
+    let just_opened = button_response.clicked();
     Popup::menu(&button_response)
         .id(popup_id)
         .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.spacing_mut().slider_width = widget_width;
-            if color_picker_oklcha_2d(ui, color, widget_width, false) {
+            if color_picker_oklcha_2d(ui, color, widget_width, false, just_opened) {
                 button_response.mark_changed();
             }
         });
@@ -536,20 +538,21 @@ pub fn color_edit_button_oklch(ui: &mut Ui, color: &mut Oklcha, widget_width: f3
     button_response
 }
 
-pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Oklcha, widget_width: f32) -> Response {
+pub fn color_edit_button_oklcha(ui: &mut Ui, oklch: &mut Oklcha, widget_width: f32) -> Response {
     let popup_id = ui.auto_id_with("popup");
     let open = Popup::is_id_open(ui.ctx(), popup_id);
-    let mut button_response = color_button(ui, color.to_srgba_unmultiplied(), open);
+    let mut button_response = color_button(ui, oklch.to_srgba_unmultiplied(), open);
     if ui.style().explanation_tooltips {
         button_response = button_response.on_hover_text("Click to edit color");
     }
 
+    let just_opened = button_response.clicked();
     Popup::menu(&button_response)
         .id(popup_id)
         .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.spacing_mut().slider_width = widget_width;
-            if color_picker_oklcha_2d(ui, color, widget_width, true) {
+            if color_picker_oklcha_2d(ui, oklch, widget_width, true, just_opened) {
                 button_response.mark_changed();
             }
         });
@@ -922,16 +925,24 @@ pub fn color_picker_panel_oklch_2d(ui: &mut Ui, plot_type: OKLabPlotType) -> (bo
     (color_changed, new_color)
 }
 
-pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Oklcha, widget_width: f32, with_alpha: bool) -> bool {
+pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Oklcha, widget_width: f32, with_alpha: bool, reset_state: bool) -> bool {
     let state_id = ui.id().with("oklch_ui_state");
-    let state: OklchUiState =
+
+    let alpha_state = if with_alpha {color.alpha} else {1.0};
+    let state_from_color = OklchUiState {
+        l: color.l,
+        c: color.c / 0.325,
+        h: color.h / TAU,
+        a: alpha_state,
+    };
+    let mut state: OklchUiState =
         ui.data(|d| d.get_temp::<OklchUiState>(state_id))
-            .unwrap_or(OklchUiState {
-                l: color.l,
-                c: color.c / 0.325,
-                h: color.h / TAU,
-                a: color.alpha,
-            });
+            .unwrap_or(state_from_color.clone());
+
+    if reset_state {
+        state = state_from_color;
+    }
+
     ui.data_mut(|d| {
         d.insert_temp(state_id, state);
     });
