@@ -49,8 +49,8 @@ fn modulus(val: f32, modulus: f32) -> f32 {
 pub fn background_checkers(painter: &Painter, rect: Rect, ny: u32) {
     let rect = rect.shrink(0.5); // Small hack to avoid the checkers from peeking through the sides
 
-    let dark_color = Color32::from_gray(80);
-    let bright_color = Color32::from_gray(180);
+    let dark_color = Color32::from_gray(90);
+    let bright_color = Color32::from_gray(190);
 
     // Adjust rect size and checker size to match
     let target_checker_size = rect.height() / ny as f32;
@@ -629,7 +629,11 @@ pub fn color_text_fields(ui: &mut Ui, color: Color32, widget_width: f32) -> (boo
     (changed, new_color)
 }
 
-pub fn oklch_sliders(ui: &mut Ui, selected_color: Oklcha, with_alpha: bool) -> (bool, OklchUiState) {
+pub fn oklch_sliders(
+    ui: &mut Ui,
+    selected_color: Oklcha,
+    with_alpha: bool,
+) -> (bool, OklchUiState) {
     // Recover state from cache
     let state_id = ui.id().with("oklch_ui_state");
     let mut state: OklchUiState = ui.data(|d| d.get_temp::<OklchUiState>(state_id)).unwrap();
@@ -925,19 +929,25 @@ pub fn color_picker_panel_oklch_2d(ui: &mut Ui, plot_type: OKLabPlotType) -> (bo
     (color_changed, new_color)
 }
 
-pub fn color_picker_oklcha_2d(ui: &mut Ui, color: &mut Oklcha, widget_width: f32, with_alpha: bool, reset_state: bool) -> bool {
+pub fn color_picker_oklcha_2d(
+    ui: &mut Ui,
+    color: &mut Oklcha,
+    widget_width: f32,
+    with_alpha: bool,
+    reset_state: bool,
+) -> bool {
     let state_id = ui.id().with("oklch_ui_state");
 
-    let alpha_state = if with_alpha {color.alpha} else {1.0};
+    let alpha_state = if with_alpha { color.alpha } else { 1.0 };
     let state_from_color = OklchUiState {
         l: color.l,
         c: color.c / 0.325,
         h: color.h / TAU,
         a: alpha_state,
     };
-    let mut state: OklchUiState =
-        ui.data(|d| d.get_temp::<OklchUiState>(state_id))
-            .unwrap_or(state_from_color.clone());
+    let mut state: OklchUiState = ui
+        .data(|d| d.get_temp::<OklchUiState>(state_id))
+        .unwrap_or(state_from_color.clone());
 
     if reset_state {
         state = state_from_color;

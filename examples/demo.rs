@@ -1,49 +1,135 @@
 use eframe::egui;
-use egui_oklab::{color_edit_button_oklcha, color_edit_button_oklch};
-use egui_oklab::oklcha::Oklcha;
-
-use std::time::Instant;
+use egui_oklab::{color_edit_button_oklch, color_edit_button_oklcha, oklcha::Oklcha};
 
 struct MyApp {
-    color: Oklcha,
-    color_reference: egui::Color32,
+    top_left: Oklcha,
+    top_right: Oklcha,
+    bottom_left: Oklcha,
+    bottom_right: Oklcha,
+    background: Oklcha,
+    dark_mode: bool,
 }
 
 impl Default for MyApp {
     fn default() -> Self {
         Self {
-            color: egui::Color32::from_rgb(128, 128, 255).into(),
-            color_reference: egui::Color32::from_rgb(128, 128, 255),
+            top_left: egui::Color32::from_rgba_unmultiplied(255, 0, 0, 128).into(),
+            top_right: egui::Color32::from_rgba_unmultiplied(0, 255, 0, 128).into(),
+            bottom_left: egui::Color32::from_rgba_unmultiplied(0, 128, 255, 128).into(),
+            bottom_right: egui::Color32::from_rgba_unmultiplied(255, 255, 0, 128).into(),
+            background: egui::Color32::from_rgb(128, 128, 128).into(),
+            dark_mode: true,
         }
     }
 }
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        let frame_start = Instant::now();
-        egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("egui Color Picker");
+        const PICKER_WIDTH: f32 = 300.0;
+        const MARGIN: f32 = 10.0;
 
-            ui.label("Pick a color:");
-
-            let widget_width = 350.;
-            color_edit_button_oklch(ui, &mut self.color, widget_width);
-            color_edit_button_oklcha(ui, &mut self.color, widget_width);
-
-            let mut hsva = self.color_reference.into();
-            ui.color_edit_button_hsva(&mut hsva);
-            self.color_reference = hsva.into();
-
-            ui.separator();
-
-            ui.label("Preview:");
-
-            let (rect, _) = ui.allocate_exact_size(egui::vec2(200.0, 100.0), egui::Sense::hover());
-
-            ui.painter().rect_filled(rect, 5.0, self.color);
+        // Set theme
+        ctx.set_visuals(if self.dark_mode {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
         });
-        let frame_time = frame_start.elapsed().as_secs_f64();
-        let fps = 1.0 / frame_time;
+
+        // Draw the center visualization first.
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let rect = ui.max_rect();
+            let painter = ui.painter();
+
+            let center = rect.center();
+
+            let radius = 110.0;
+            let offset = 70.0;
+
+            painter.rect_filled(rect, 0.0, ui.visuals().panel_fill);
+
+            painter.circle_filled(center, radius * 2.5, self.background);
+
+            painter.circle_filled(center + egui::vec2(-offset, -offset), radius, self.top_left);
+
+            painter.circle_filled(center + egui::vec2(offset, -offset), radius, self.top_right);
+
+            painter.circle_filled(
+                center + egui::vec2(-offset, offset),
+                radius,
+                self.bottom_left,
+            );
+
+            painter.circle_filled(
+                center + egui::vec2(offset, offset),
+                radius,
+                self.bottom_right,
+            );
+        });
+
+        // Top-left picker
+        egui::Area::new("top_left".into())
+            .anchor(egui::Align2::LEFT_TOP, egui::vec2(MARGIN, MARGIN))
+            .show(ctx, |ui| {
+                color_edit_button_oklcha(ui, &mut self.top_left, PICKER_WIDTH);
+            });
+
+        // Top-right picker
+        egui::Area::new("top_right".into())
+            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-MARGIN, MARGIN))
+            .show(ctx, |ui| {
+                color_edit_button_oklcha(ui, &mut self.top_right, PICKER_WIDTH);
+            });
+
+        // Background picker
+        egui::Area::new("background_picker".into())
+            .anchor(egui::Align2::RIGHT_CENTER, egui::vec2(-MARGIN, MARGIN))
+            .show(ctx, |ui| {
+                color_edit_button_oklch(ui, &mut self.background, PICKER_WIDTH)
+                    .on_hover_text("Background color");
+            });
+
+        // Bottom-left picker
+        egui::Area::new("bottom_left".into())
+            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(MARGIN, -MARGIN))
+            .show(ctx, |ui| {
+                color_edit_button_oklcha(ui, &mut self.bottom_left, PICKER_WIDTH);
+            });
+
+        // Bottom-right picker
+        egui::Area::new("bottom_right".into())
+            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-MARGIN, -MARGIN))
+            .show(ctx, |ui| {
+                color_edit_button_oklcha(ui, &mut self.bottom_right, PICKER_WIDTH);
+            });
+
+        // Quit button
+        egui::Area::new("quit_button".into())
+            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 20.0))
+            .show(ctx, |ui| {
+                if ui
+                    .add_sized([34.0, 20.0], egui::Button::new("Quit"))
+                    .clicked()
+                {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            });
+
+        // Theme toggle
+        egui::Area::new("theme_toggle".into())
+            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 50.0))
+            .show(ctx, |ui| {
+                let label = if self.dark_mode {
+                    "🌙 Dark Theme"
+                } else {
+                    "☀ Light Theme"
+                };
+
+                let button_response = ui.add_sized([100.0, 20.0], egui::Button::new(label));
+                if button_response.clicked() {
+                    self.dark_mode = !self.dark_mode;
+                }
+                button_response.on_hover_text("Switch between light and dark mode");
+            });
     }
 }
 
@@ -51,7 +137,7 @@ fn main() -> Result<(), eframe::Error> {
     let options = eframe::NativeOptions::default();
 
     eframe::run_native(
-        "Color Picker Example",
+        "OKLCHA Color Picker Demo",
         options,
         Box::new(|_cc| Ok(Box::new(MyApp::default()))),
     )
