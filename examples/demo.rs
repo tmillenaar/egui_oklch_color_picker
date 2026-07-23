@@ -1,12 +1,12 @@
 use eframe::egui;
-use egui_oklab::{color_edit_button_oklch, color_edit_button_oklcha, oklcha::Oklcha};
+use egui_oklab::{color_edit_button_oklch, color_edit_button_oklcha, oklch::Oklch};
 
 struct MyApp {
-    top_left: Oklcha,
-    top_right: Oklcha,
-    bottom_left: Oklcha,
-    bottom_right: Oklcha,
-    background: Oklcha,
+    top_left: Oklch,
+    top_right: Oklch,
+    bottom_left: Oklch,
+    bottom_right: Oklch,
+    background: Oklch,
     dark_mode: bool,
 }
 

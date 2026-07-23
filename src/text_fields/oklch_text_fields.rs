@@ -1,11 +1,11 @@
 use crate::conversions::*;
-use crate::oklcha::*;
+use crate::oklch::*;
 use crate::text_fields::editable_text_field::*;
 use crate::ui_extras::copy_icon::*;
 
 use egui::*;
 
-fn parse_oklch(text: &str) -> Option<Oklcha> {
+fn parse_oklch(text: &str) -> Option<Oklch> {
     let text = text
         .trim()
         .trim_matches(|c| matches!(c, '(' | ')' | '[' | ']' | '{' | '}'));
@@ -28,15 +28,20 @@ fn parse_oklch(text: &str) -> Option<Oklcha> {
         .to_radians()
         .rem_euclid(std::f32::consts::TAU);
 
-    Some(Oklcha { l, c, h, alpha: 1.0 })
+    Some(Oklch {
+        l,
+        c,
+        h,
+        alpha: 1.0,
+    })
 }
 
 pub struct OklchEdit<'a> {
-    pub oklch: &'a mut Oklcha,
+    pub oklch: &'a mut Oklch,
 }
 
 impl<'a> OklchEdit<'a> {
-    pub fn new(oklch: &'a mut Oklcha) -> Self {
+    pub fn new(oklch: &'a mut Oklch) -> Self {
         Self { oklch }
     }
 

@@ -5,7 +5,7 @@ use egui::*;
 
 use crate::color_projection::*;
 use crate::coordinate_transforms::*;
-use crate::oklcha::*;
+use crate::oklch::*;
 
 pub type StableHuePicker = CachedPicker<CartesianTransform, StableHueProjection>;
 
@@ -337,7 +337,7 @@ where
         Some(self.pixel_to_coord(border_pixel))
     }
 
-    pub fn nearest_valid_color(&self, coord: T::Coord) -> Oklcha {
+    pub fn nearest_valid_color(&self, coord: T::Coord) -> Oklch {
         let mut oklch = self.projection.color_at(coord);
 
         if oklch.is_valid_srgb() {

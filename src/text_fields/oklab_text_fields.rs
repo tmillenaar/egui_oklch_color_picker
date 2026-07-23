@@ -1,11 +1,11 @@
 use crate::conversions::*;
-use crate::oklaba::*;
+use crate::oklab::*;
 use crate::text_fields::editable_text_field::*;
 use crate::ui_extras::copy_icon::*;
 
 use egui::*;
 
-fn parse_oklab(text: &str) -> Option<Oklaba> {
+fn parse_oklab(text: &str) -> Option<Oklab> {
     let text = text
         .trim()
         .trim_matches(|c| matches!(c, '(' | ')' | '[' | ']' | '{' | '}'));
@@ -23,15 +23,20 @@ fn parse_oklab(text: &str) -> Option<Oklaba> {
     let a = parts[1].parse::<f32>().ok()?;
     let b = parts[2].parse::<f32>().ok()?;
 
-    Some(Oklaba { l, a, b, alpha: 1.0 })
+    Some(Oklab {
+        l,
+        a,
+        b,
+        alpha: 1.0,
+    })
 }
 
 pub struct OklabEdit<'a> {
-    pub oklab: &'a mut Oklaba,
+    pub oklab: &'a mut Oklab,
 }
 
 impl<'a> OklabEdit<'a> {
-    pub fn new(oklab: &'a mut Oklaba) -> Self {
+    pub fn new(oklab: &'a mut Oklab) -> Self {
         Self { oklab }
     }
 

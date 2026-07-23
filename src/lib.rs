@@ -4,8 +4,8 @@
 mod color_projection;
 mod conversions;
 mod coordinate_transforms;
-pub mod oklaba;
-pub mod oklcha;
+pub mod oklab;
+pub mod oklch;
 mod picker_2d;
 mod text_fields;
 mod ui_extras;
@@ -13,8 +13,8 @@ mod ui_extras;
 use crate::color_projection::*;
 use crate::conversions::*;
 use crate::coordinate_transforms::*;
-use crate::oklaba::*;
-use crate::oklcha::*;
+use crate::oklab::*;
+use crate::oklch::*;
 use crate::picker_2d::*;
 use crate::text_fields::hex_text_field::*;
 use crate::text_fields::hsv_text_fields::*;
@@ -130,7 +130,7 @@ pub fn color_slider_1d_grid(
     slider_value: &mut f32,
     slider_value_nearest_color: f32,
     nearest_color: Color32,
-    color_at: impl Fn(f32) -> Oklcha,
+    color_at: impl Fn(f32) -> Oklch,
     background_color_at: Option<impl Fn(f32) -> Color32>,
     axis_name: &str,
 ) -> Response {
@@ -515,7 +515,7 @@ enum OKLabPlotType {
     StableHue,
 }
 
-pub fn color_edit_button_oklch(ui: &mut Ui, color: &mut Oklcha, widget_width: f32) -> Response {
+pub fn color_edit_button_oklch(ui: &mut Ui, color: &mut Oklch, widget_width: f32) -> Response {
     let popup_id = ui.auto_id_with("popup");
     let open = Popup::is_id_open(ui.ctx(), popup_id);
     let mut button_response = color_button(ui, color.to_srgba_unmultiplied(), open);
@@ -538,7 +538,7 @@ pub fn color_edit_button_oklch(ui: &mut Ui, color: &mut Oklcha, widget_width: f3
     button_response
 }
 
-pub fn color_edit_button_oklcha(ui: &mut Ui, oklch: &mut Oklcha, widget_width: f32) -> Response {
+pub fn color_edit_button_oklcha(ui: &mut Ui, oklch: &mut Oklch, widget_width: f32) -> Response {
     let popup_id = ui.auto_id_with("popup");
     let open = Popup::is_id_open(ui.ctx(), popup_id);
     let mut button_response = color_button(ui, oklch.to_srgba_unmultiplied(), open);
@@ -595,7 +595,7 @@ pub fn color_text_fields(ui: &mut Ui, color: Color32, widget_width: f32) -> (boo
 
     // Oklab text fields
     ui.horizontal(|ui| {
-        let mut oklab = Oklaba::from(color.to_opaque());
+        let mut oklab = Oklab::from(color.to_opaque());
         if OklabEdit::new(&mut oklab).ui(ui, widget_width + 34.) {
             let color = oklab_to_color32(oklab);
             let rgba = if oklab.is_valid_srgb() {
@@ -629,11 +629,7 @@ pub fn color_text_fields(ui: &mut Ui, color: Color32, widget_width: f32) -> (boo
     (changed, new_color)
 }
 
-pub fn oklch_sliders(
-    ui: &mut Ui,
-    selected_color: Oklcha,
-    with_alpha: bool,
-) -> (bool, OklchUiState) {
+pub fn oklch_sliders(ui: &mut Ui, selected_color: Oklch, with_alpha: bool) -> (bool, OklchUiState) {
     // Recover state from cache
     let state_id = ui.id().with("oklch_ui_state");
     let mut state: OklchUiState = ui.data(|d| d.get_temp::<OklchUiState>(state_id)).unwrap();
@@ -649,7 +645,7 @@ pub fn oklch_sliders(
             &mut state.l,
             selected_color.l,
             selected_color.into(),
-            |l_mut| Oklcha {
+            |l_mut| Oklch {
                 l: l_mut,
                 c,
                 h,
@@ -675,7 +671,7 @@ pub fn oklch_sliders(
             &mut state.c,
             selected_color.c / 0.325,
             selected_color.into(),
-            |c_mut| Oklcha {
+            |c_mut| Oklch {
                 l,
                 c: c_mut * 0.325,
                 h,
@@ -699,7 +695,7 @@ pub fn oklch_sliders(
     // Hue slider
     let determine_hue_slider_colors = |h_mut| {
         // Define lightness and chroma that exist for all hues
-        let bg_color = oklch_to_color32(Oklcha {
+        let bg_color = oklch_to_color32(Oklch {
             l: 0.750,
             c: 0.127,
             h: h_mut * std::f32::consts::TAU,
@@ -715,7 +711,7 @@ pub fn oklch_sliders(
             &mut state.h,
             selected_color.h / std::f32::consts::TAU,
             selected_color.into(),
-            |h_mut| Oklcha {
+            |h_mut| Oklch {
                 l: l,
                 c: c,
                 h: h_mut * std::f32::consts::TAU,
@@ -813,7 +809,7 @@ pub fn plot_type_selector(ui: &mut Ui) -> (bool, OKLabPlotType) {
     (tab_changed, tab)
 }
 
-pub fn color_picker_panel_oklch_2d(ui: &mut Ui, plot_type: OKLabPlotType) -> (bool, Oklcha) {
+pub fn color_picker_panel_oklch_2d(ui: &mut Ui, plot_type: OKLabPlotType) -> (bool, Oklch) {
     // Recover state from cache
     let state_id = ui.id().with("oklch_ui_state");
     let mut state: OklchUiState =
@@ -931,7 +927,7 @@ pub fn color_picker_panel_oklch_2d(ui: &mut Ui, plot_type: OKLabPlotType) -> (bo
 
 pub fn color_picker_oklcha_2d(
     ui: &mut Ui,
-    color: &mut Oklcha,
+    color: &mut Oklch,
     widget_width: f32,
     with_alpha: bool,
     reset_state: bool,
@@ -973,7 +969,7 @@ pub fn color_picker_oklcha_2d(
         *color = new_color;
     }
     if color_changed_by_sliders {
-        let oklch = Oklcha {
+        let oklch = Oklch {
             l: new_state.l,
             c: new_state.c * 0.325,
             h: new_state.h * std::f32::consts::TAU,
