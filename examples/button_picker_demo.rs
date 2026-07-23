@@ -25,7 +25,7 @@ impl Default for MyApp {
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        const PICKER_WIDTH: f32 = 300.0;
+        const PICKER_WIDTH: f32 = 380.0;
         const MARGIN: f32 = 10.0;
 
         // Set theme
@@ -85,7 +85,7 @@ impl eframe::App for MyApp {
                 let label = if self.dark_mode {
                     "🌙 Dark Theme"
                 } else {
-                    "☀ Light Theme"
+                    "🔦 Flash me baby"
                 };
 
                 let button_response = ui.add_sized([100.0, 20.0], egui::Button::new(label));

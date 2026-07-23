@@ -1,75 +1,40 @@
 use eframe::egui;
 use egui_oklab::{color_picker_oklch_2d, oklch::Oklch};
 
-struct MyApp {
+pub struct EmbeddedDemo {
     left: Oklch,
     right: Oklch,
-    dark_mode: bool,
 }
 
-impl Default for MyApp {
+impl Default for EmbeddedDemo {
     fn default() -> Self {
         Self {
             left: egui::Color32::from_rgb(70, 150, 255).into(),
             right: egui::Color32::from_rgba_unmultiplied(255, 80, 80, 160).into(),
-            dark_mode: true,
         }
     }
 }
 
-impl eframe::App for MyApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        const PICKER_WIDTH: f32 = 370.0;
-        const MARGIN: f32 = 10.0;
+impl EmbeddedDemo {
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
+        let picker_width = (ui.available_width() * 0.28).clamp(180.0, 380.0);
+        let panel_width = picker_width + 80.0;
+        const HEADER_HEIGHT: f32 = 48.0;
 
-        ctx.set_visuals(if self.dark_mode {
-            egui::Visuals::dark()
-        } else {
-            egui::Visuals::light()
-        });
+        let rect = ui.available_rect_before_wrap();
 
-        // Quit button when running native
-        #[cfg(not(target_arch = "wasm32"))]
-        egui::Area::new("quit_button".into())
-            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 20.0))
-            .show(ctx, |ui| {
-                if ui
-                    .add_sized([34.0, 20.0], egui::Button::new("Quit"))
-                    .clicked()
-                {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-            });
+        //
+        // Header
+        //
+        let header_rect = egui::Rect::from_min_max(
+            rect.left_top(),
+            egui::pos2(rect.right(), rect.top() + HEADER_HEIGHT),
+        );
 
-        // If there is no quit button, move the theme button up
-        #[cfg(not(target_arch = "wasm32"))]
-        let vertical_offset_theme_btn = 50.0;
-        #[cfg(target_arch = "wasm32")]
-        let vertical_offset_theme_btn = 20.0;
-        // Theme toggle
-        egui::Area::new("theme_toggle".into())
-            .anchor(
-                egui::Align2::CENTER_TOP,
-                egui::vec2(0.0, vertical_offset_theme_btn),
-            )
-            .show(ctx, |ui| {
-                let label = if self.dark_mode {
-                    "🌙 Dark Theme"
-                } else {
-                    "☀ Light Theme"
-                };
+        ui.scope_builder(egui::UiBuilder::new().max_rect(header_rect), |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(8.0);
 
-                let button_response = ui.add_sized([100.0, 20.0], egui::Button::new(label));
-                if button_response.clicked() {
-                    self.dark_mode = !self.dark_mode;
-                }
-                button_response.on_hover_text("Switch between light and dark mode");
-            });
-
-        // Instruction description
-        egui::Area::new("instructions".into())
-            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 100.0))
-            .show(ctx, |ui| {
                 ui.label(
                     egui::RichText::new(
                         "Permanent panels on the sides control the colors in the center.",
@@ -78,85 +43,68 @@ impl eframe::App for MyApp {
                     .italics(),
                 );
             });
+        });
 
-        // Center visualization
-        egui::CentralPanel::default().show(ctx, |ui| {
+        //
+        // Remaining content
+        //
+        let content = egui::Rect::from_min_max(
+            egui::pos2(rect.left(), header_rect.bottom()),
+            rect.right_bottom(),
+        );
+
+        let left_rect = egui::Rect::from_min_max(
+            content.left_top(),
+            egui::pos2(content.left() + panel_width, content.bottom()),
+        );
+
+        let right_rect = egui::Rect::from_min_max(
+            egui::pos2(content.right() - panel_width, content.top()),
+            content.right_bottom(),
+        );
+
+        let center_rect = egui::Rect::from_min_max(
+            egui::pos2(left_rect.right(), content.top()),
+            egui::pos2(right_rect.left(), content.bottom()),
+        );
+
+        //
+        // Left picker
+        //
+        ui.scope_builder(egui::UiBuilder::new().max_rect(left_rect), |ui| {
+            ui.heading("Opaque OKLCH");
+
+            color_picker_oklch_2d(ui, &mut self.left, picker_width, false, false);
+        });
+
+        //
+        // Right picker
+        //
+        ui.scope_builder(egui::UiBuilder::new().max_rect(right_rect), |ui| {
+            ui.heading("OKLCH with alpha");
+
+            color_picker_oklch_2d(ui, &mut self.right, picker_width, true, false);
+        });
+
+        //
+        // Center preview
+        //
+        ui.scope_builder(egui::UiBuilder::new().max_rect(center_rect), |ui| {
             let rect = ui.max_rect();
             let painter = ui.painter();
 
             painter.rect_filled(rect, 0.0, ui.visuals().panel_fill);
 
             let center = rect.center();
-            let radius = 120.0;
 
-            painter.circle_filled(center + egui::vec2(-55.0, 0.0), radius, self.left);
+            let size = rect.size().min_elem();
 
-            painter.circle_filled(center + egui::vec2(55.0, 0.0), radius, self.right);
+            let radius = (size * 0.28).clamp(40.0, 120.0);
+            let offset = radius * 0.46;
+
+            painter.circle_filled(center + egui::vec2(-offset, 0.0), radius, self.left);
+
+            painter.circle_filled(center + egui::vec2(offset, 0.0), radius, self.right);
         });
-
-        // Left picker (OKLCH)
-        egui::SidePanel::left("left_picker")
-            .default_width(PICKER_WIDTH + 20.0)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.heading("Opaque OKLCH");
-
-                color_picker_oklch_2d(
-                    ui,
-                    &mut self.left,
-                    PICKER_WIDTH,
-                    false, // no alpha slider
-                    false, // don't reset state every frame
-                );
-            });
-
-        // Right picker (OKLCHA)
-        egui::SidePanel::right("right_picker")
-            .default_width(PICKER_WIDTH + 20.0)
-            .resizable(false)
-            .show(ctx, |ui| {
-                ui.heading("OKLCH with alpha");
-
-                color_picker_oklch_2d(
-                    ui,
-                    &mut self.right,
-                    PICKER_WIDTH,
-                    true, // alpha slider enabled
-                    false,
-                );
-            });
     }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn main() -> Result<(), eframe::Error> {
-    eframe::run_native(
-        "OKLCH 2D Picker Demo",
-        eframe::NativeOptions::default(),
-        Box::new(|_| Ok(Box::new(MyApp::default()))),
-    )
-}
-
-#[cfg(target_arch = "wasm32")]
-fn main() {
-    use wasm_bindgen::JsCast;
-
-    wasm_bindgen_futures::spawn_local(async {
-        let document = web_sys::window().unwrap().document().unwrap();
-
-        let canvas = document
-            .get_element_by_id("the_canvas")
-            .unwrap()
-            .dyn_into::<web_sys::HtmlCanvasElement>()
-            .unwrap();
-
-        eframe::WebRunner::new()
-            .start(
-                canvas,
-                eframe::WebOptions::default(),
-                Box::new(|_| Ok(Box::new(MyApp::default()))),
-            )
-            .await
-            .unwrap();
-    });
 }

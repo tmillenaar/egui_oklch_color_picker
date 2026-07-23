@@ -71,7 +71,7 @@ fn editable_rect(
 
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        const PICKER_WIDTH: f32 = 300.0;
+        const PICKER_WIDTH: f32 = 380.0;
         const MARGIN: f32 = 10.0;
 
         ctx.set_visuals(if self.dark_mode {

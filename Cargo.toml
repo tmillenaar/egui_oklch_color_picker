@@ -12,8 +12,20 @@ fast-math = "0.1.1"
 eframe = "0.33.3"
 
 [[bin]]
-name = "embedded_picker_demo"
-path = "src/examples/embedded_picker_demo.rs"
+name = "demo"
+path = "src/examples/demo.rs"
+
+# [[bin]]
+# name = "embedded_picker_demo"
+# path = "src/examples/embedded_picker_demo.rs"
+
+# [[bin]]
+# name = "button_picker_demo"
+# path = "src/examples/button_picker_demo.rs"
+
+# [[bin]]
+# name = "popup_picker_demo"
+# path = "src/examples/popup_picker_demo.rs"
 
 [target.wasm32-unknown-unknown.dependencies]
 wasm-bindgen-futures = "0.4.76"
