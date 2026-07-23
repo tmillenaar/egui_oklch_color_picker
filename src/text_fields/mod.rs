@@ -1,3 +1,4 @@
+pub mod color_text_fields;
 pub mod editable_text_field;
 pub mod hex_text_field;
 pub mod hsv_text_fields;

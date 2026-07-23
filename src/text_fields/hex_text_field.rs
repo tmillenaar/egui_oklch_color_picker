@@ -1,7 +1,7 @@
 use egui::*;
 
+use crate::supporting_widgets::copy_icon::*;
 use crate::text_fields::editable_text_field::{NumericEdit, editable_text_field};
-use crate::ui_extras::copy_icon::*;
 
 pub struct HexEdit<'a> {
     pub rgb: &'a mut [u8; 3],

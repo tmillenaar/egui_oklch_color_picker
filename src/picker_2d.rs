@@ -7,13 +7,13 @@ use crate::color_projection::*;
 use crate::coordinate_transforms::*;
 use crate::oklch::*;
 
-pub type StableHuePicker = CachedPicker<CartesianTransform, StableHueProjection>;
+pub type StableHuePicker = ColorPicker2d<CartesianTransform, StableHueProjection>;
 
-pub type StableChromaPicker = CachedPicker<PolarTransform, StableChromaProjection>;
+pub type StableChromaPicker = ColorPicker2d<PolarTransform, StableChromaProjection>;
 
-pub type StableLightnessPicker = CachedPicker<PolarTransform, StableLightnessProjection>;
+pub type StableLightnessPicker = ColorPicker2d<PolarTransform, StableLightnessProjection>;
 
-pub struct CachedPicker<T, P>
+pub struct ColorPicker2d<T, P>
 where
     T: CoordinateTransform,
     P: ColorProjection<T::Coord>,
@@ -39,7 +39,7 @@ where
     _transform: PhantomData<T>,
 }
 
-impl<T, P> CachedPicker<T, P>
+impl<T, P> ColorPicker2d<T, P>
 where
     T: CoordinateTransform,
     P: ColorProjection<T::Coord>,
@@ -378,7 +378,7 @@ where
     }
 }
 
-impl<T, P> Clone for CachedPicker<T, P>
+impl<T, P> Clone for ColorPicker2d<T, P>
 where
     T: CoordinateTransform,
     P: ColorProjection<T::Coord> + Clone,

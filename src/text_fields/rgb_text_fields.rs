@@ -1,5 +1,5 @@
+use crate::supporting_widgets::copy_icon::*;
 use crate::text_fields::editable_text_field::*;
-use crate::ui_extras::copy_icon::*;
 use egui::*;
 
 fn parse_rgb(text: &str) -> Option<[u8; 3]> {

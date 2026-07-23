@@ -1,6 +1,6 @@
 use crate::conversions::*;
+use crate::supporting_widgets::copy_icon::*;
 use crate::text_fields::editable_text_field::*;
-use crate::ui_extras::copy_icon::*;
 
 use egui::*;
 
