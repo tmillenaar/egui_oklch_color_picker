@@ -4,8 +4,25 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+eframe = "0.33.3"
 egui = "0.33.3"
 fast-math = "0.1.1"
 
 [dev-dependencies]
 eframe = "0.33.3"
+
+[[bin]]
+name = "embedded_picker_demo"
+path = "src/examples/embedded_picker_demo.rs"
+
+[target.wasm32-unknown-unknown.dependencies]
+wasm-bindgen-futures = "0.4.76"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "HtmlCanvasElement",
+] }
