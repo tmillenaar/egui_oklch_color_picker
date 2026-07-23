@@ -18,7 +18,7 @@ where
 {
     let mut color_changed = false;
 
-    let desired_size = Vec2::splat(ui.spacing().slider_width + 34.);
+    let desired_size = Vec2::splat(ui.spacing().slider_width + 64.);
 
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
 

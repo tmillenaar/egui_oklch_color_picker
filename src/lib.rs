@@ -66,48 +66,146 @@ enum OKLabPlotType {
 }
 
 pub fn color_edit_button_oklch(ui: &mut Ui, color: &mut Oklch, widget_width: f32) -> Response {
-    let popup_id = ui.auto_id_with("popup");
-    let open = Popup::is_id_open(ui.ctx(), popup_id);
-    let mut button_response = color_button(ui, color.to_srgba_unmultiplied(), open);
+    let mut response = color_button(
+        ui,
+        color.to_srgba_unmultiplied(),
+        Popup::is_id_open(ui.ctx(), ui.auto_id_with("popup")),
+    );
 
     if ui.style().explanation_tooltips {
-        button_response = button_response.on_hover_text("Click to edit color");
+        response = response.on_hover_text("Click to edit color");
     }
 
-    let just_opened = button_response.clicked();
-    Popup::menu(&button_response)
-        .id(popup_id)
-        .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
-        .show(|ui| {
-            ui.spacing_mut().slider_width = widget_width;
-            if color_picker_oklcha_2d(ui, color, widget_width, false, just_opened) {
-                button_response.mark_changed();
-            }
-        });
+    if color_popup(&response, color, widget_width, false) {
+        response.mark_changed();
+    }
 
-    button_response
+    response
 }
 
-pub fn color_edit_button_oklcha(ui: &mut Ui, oklch: &mut Oklch, widget_width: f32) -> Response {
-    let popup_id = ui.auto_id_with("popup");
-    let open = Popup::is_id_open(ui.ctx(), popup_id);
-    let mut button_response = color_button(ui, oklch.to_srgba_unmultiplied(), open);
-    if ui.style().explanation_tooltips {
-        button_response = button_response.on_hover_text("Click to edit color");
-    }
+fn color_popup(
+    response: &Response,
+    color: &mut Oklch,
+    widget_width: f32,
+    with_alpha: bool,
+) -> bool {
+    let popup_id = response.id.with("popup");
 
-    let just_opened = button_response.clicked();
-    Popup::menu(&button_response)
+    let mut changed = false;
+    let just_opened = response.clicked();
+
+    Popup::menu(response)
         .id(popup_id)
         .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
         .show(|ui| {
             ui.spacing_mut().slider_width = widget_width;
-            if color_picker_oklcha_2d(ui, oklch, widget_width, true, just_opened) {
-                button_response.mark_changed();
+
+            if color_picker_oklch_2d(ui, color, widget_width, with_alpha, just_opened) {
+                changed = true;
             }
         });
 
-    button_response
+    changed
+}
+
+pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Oklch, widget_width: f32) -> Response {
+    let mut response = color_button(
+        ui,
+        color.to_srgba_unmultiplied(),
+        Popup::is_id_open(ui.ctx(), ui.auto_id_with("popup")),
+    );
+
+    if ui.style().explanation_tooltips {
+        response = response.on_hover_text("Click to edit color");
+    }
+
+    if color_popup(&response, color, widget_width, true) {
+        response.mark_changed();
+    }
+
+    response
+}
+
+pub fn color_popup_oklcha_simple(
+    response: &Response,
+    color: &mut Oklch,
+    widget_width: f32,
+) -> bool {
+    color_popup_oklcha_advanced(
+        response,
+        response.clicked(),
+        response.clicked(),
+        color,
+        widget_width,
+    )
+}
+
+pub fn color_popup_oklch_simple(response: &Response, color: &mut Oklch, widget_width: f32) -> bool {
+    color_popup_oklch_advanced(
+        response,
+        response.clicked(),
+        response.clicked(),
+        color,
+        widget_width,
+    )
+}
+
+pub fn color_popup_oklcha_advanced(
+    response: &Response,
+    open: bool,
+    reset_state: bool,
+    color: &mut Oklch,
+    widget_width: f32,
+) -> bool {
+    let mut changed = false;
+
+    let popup_id = response.id.with("popup");
+    if open {
+        Popup::open_id(&response.ctx, popup_id);
+    }
+    Popup::from_response(response)
+        .id(popup_id)
+        .open_memory(None)
+        .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.spacing_mut().slider_width = widget_width;
+
+            if color_picker_oklch_2d(ui, color, widget_width, true, reset_state) {
+                changed = true;
+            }
+        });
+
+    changed
+}
+
+pub fn color_popup_oklch_advanced(
+    response: &Response,
+    open: bool,
+    reset_state: bool,
+    color: &mut Oklch,
+    widget_width: f32,
+) -> bool {
+    let popup_id = response.id.with("popup");
+
+    if open {
+        Popup::open_id(&response.ctx, popup_id);
+    }
+
+    let mut changed = false;
+
+    Popup::from_response(response)
+        .id(popup_id)
+        .open_memory(None)
+        .close_behavior(PopupCloseBehavior::CloseOnClickOutside)
+        .show(|ui| {
+            ui.spacing_mut().slider_width = widget_width;
+
+            if color_picker_oklch_2d(ui, color, widget_width, false, reset_state) {
+                changed = true;
+            }
+        });
+
+    changed
 }
 
 fn plot_type_selector(ui: &mut Ui) -> (bool, OKLabPlotType) {
@@ -268,13 +366,15 @@ pub fn color_picker_panel_oklch_2d(ui: &mut Ui, plot_type: OKLabPlotType) -> (bo
     (color_changed, new_color)
 }
 
-pub fn color_picker_oklcha_2d(
+pub fn color_picker_oklch_2d(
     ui: &mut Ui,
     color: &mut Oklch,
     widget_width: f32,
     with_alpha: bool,
     reset_state: bool,
 ) -> bool {
+    ui.spacing_mut().slider_width = widget_width;
+
     let state_id = ui.id().with("oklch_ui_state");
 
     let alpha_state = if with_alpha { color.alpha } else { 1.0 };

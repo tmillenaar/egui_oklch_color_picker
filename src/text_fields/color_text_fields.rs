@@ -23,7 +23,7 @@ pub fn color_text_fields(ui: &mut Ui, color: Color32, widget_width: f32) -> (boo
     let mut srgb = [srgba[0], srgba[1], srgba[2]];
     let alpha = srgba[3];
     ui.horizontal(|ui| {
-        if HexEdit::new(&mut srgb).ui(ui, widget_width + 34.0) {
+        if HexEdit::new(&mut srgb).ui(ui, widget_width + 38.0) {
             new_color = Color32::from_rgba_unmultiplied(srgb[0], srgb[1], srgb[2], alpha);
             changed = true;
         }
@@ -31,7 +31,7 @@ pub fn color_text_fields(ui: &mut Ui, color: Color32, widget_width: f32) -> (boo
 
     // RGB text fields
     ui.horizontal(|ui| {
-        if RgbEdit::new(&mut srgb).ui(ui, widget_width + 34.) {
+        if RgbEdit::new(&mut srgb).ui(ui, widget_width + 38.0) {
             new_color = Color32::from_rgba_unmultiplied(srgb[0], srgb[1], srgb[2], alpha);
             changed = true;
         }
@@ -40,7 +40,7 @@ pub fn color_text_fields(ui: &mut Ui, color: Color32, widget_width: f32) -> (boo
     // HSV text fields
     ui.horizontal(|ui| {
         let mut hsv = color32_to_hsv(color.to_opaque());
-        if HsvEdit::new(&mut hsv).ui(ui, widget_width + 34.) {
+        if HsvEdit::new(&mut hsv).ui(ui, widget_width + 38.0) {
             let rgba = hsv_to_color32(hsv).to_array();
             new_color = Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], alpha);
             changed = true;
@@ -50,7 +50,7 @@ pub fn color_text_fields(ui: &mut Ui, color: Color32, widget_width: f32) -> (boo
     // Oklab text fields
     ui.horizontal(|ui| {
         let mut oklab = Oklab::from(color.to_opaque());
-        if OklabEdit::new(&mut oklab).ui(ui, widget_width + 34.) {
+        if OklabEdit::new(&mut oklab).ui(ui, widget_width + 38.0) {
             let color = oklab_to_color32(oklab);
             let rgba = if oklab.is_valid_srgb() {
                 color.to_srgba_unmultiplied()
@@ -67,7 +67,7 @@ pub fn color_text_fields(ui: &mut Ui, color: Color32, widget_width: f32) -> (boo
     ui.horizontal(|ui| {
         let mut oklch = color32_to_oklch(color.to_opaque());
 
-        if OklchEdit::new(&mut oklch).ui(ui, widget_width + 34.) {
+        if OklchEdit::new(&mut oklch).ui(ui, widget_width + 38.0) {
             let color = oklch_to_color32(oklch);
             let rgba = if oklch.is_valid_srgb() {
                 color.to_srgba_unmultiplied()

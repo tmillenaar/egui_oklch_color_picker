@@ -137,10 +137,14 @@ where
 
         for y in 0..height {
             for x in 0..width {
-                // Sample at pixel centers to avoid bias.
+                // Note: We can sample at pixel centers to avoid bias by adding 0.5 to x and y here,
+                //       but that would mean we have to add the same offset in other places in the code
+                //       to stay consistent. This turns out to be hard to oversee so we accept the bias.
+                //       The most important thing is that the color shown on the panel matches the rest
+                //       of the widget. It being drawn half a pixel off is not as relevant.
                 let pixel = Pos2 {
-                    x: x as f32 + 0.5,
-                    y: y as f32 + 0.5,
+                    x: x as f32,
+                    y: y as f32,
                 };
 
                 coordinates.push(self.pixel_to_coord(pixel));

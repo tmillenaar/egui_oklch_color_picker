@@ -33,13 +33,15 @@ pub fn oklch_sliders(ui: &mut Ui, selected_color: Oklch, with_alpha: bool) -> (b
             &"lightness",
         )
         .on_hover_text("Lightness");
-        DragValue::new(&mut state.l)
-            .prefix("L: ")
-            .speed(0.003)
-            .range(0.0..=1.0)
-            .custom_formatter(|n, _| format!("{n:.03}"))
-            .ui(ui)
-            .on_hover_text("Lightness");
+        ui.add_sized(
+            [56.0, ui.spacing().interact_size.y],
+            DragValue::new(&mut state.l)
+                .prefix("L: ")
+                .speed(0.003)
+                .range(0.0..=1.0)
+                .custom_formatter(|n, _| format!("{n:.03}")),
+        )
+        .on_hover_text("Lightness");
     });
 
     // Chroma slider
@@ -60,13 +62,15 @@ pub fn oklch_sliders(ui: &mut Ui, selected_color: Oklch, with_alpha: bool) -> (b
         )
         .on_hover_text("Chroma");
         let mut chroma_val = state.c * 0.325;
-        DragValue::new(&mut chroma_val)
-            .prefix("C: ")
-            .speed(0.001)
-            .range(0.0..=0.325)
-            .custom_formatter(|n, _| format!("{n:.03}"))
-            .ui(ui)
-            .on_hover_text("Chroma");
+        ui.add_sized(
+            [56.0, ui.spacing().interact_size.y],
+            DragValue::new(&mut chroma_val)
+                .prefix("C: ")
+                .speed(0.003)
+                .range(0.0..=0.325)
+                .custom_formatter(|n, _| format!("{n:.03}")),
+        )
+        .on_hover_text("Chroma");
         state.c = chroma_val / 0.325;
     });
 
@@ -100,13 +104,15 @@ pub fn oklch_sliders(ui: &mut Ui, selected_color: Oklch, with_alpha: bool) -> (b
         )
         .on_hover_text("Hue");
         let mut hue_val = state.h * 360.;
-        DragValue::new(&mut hue_val)
-            .prefix("H: ")
-            .speed(1.0)
-            .range(0.0..=360.)
-            .custom_formatter(|n, _| format!("{n:.1}"))
-            .ui(ui)
-            .on_hover_text("Hue");
+        ui.add_sized(
+            [56.0, ui.spacing().interact_size.y],
+            DragValue::new(&mut hue_val)
+                .prefix("H: ")
+                .speed(1.0)
+                .range(0.0..=360.)
+                .custom_formatter(|n, _| format!("{n:.1}")),
+        )
+        .on_hover_text("Hue");
         state.h = hue_val / 360.;
     });
 
@@ -126,13 +132,15 @@ pub fn oklch_sliders(ui: &mut Ui, selected_color: Oklch, with_alpha: bool) -> (b
                 &"alpha",
             )
             .on_hover_text("Transparency (Alpha)");
-            DragValue::new(&mut state.a)
-                .prefix("A: ")
-                .speed(1.0)
-                .range(0.0..=1.0)
-                .custom_formatter(|n, _| format!("{n:.3}"))
-                .ui(ui)
-                .on_hover_text("Transparency (Alpha)");
+            ui.add_sized(
+                [56.0, ui.spacing().interact_size.y],
+                DragValue::new(&mut state.l)
+                    .prefix("A: ")
+                    .speed(0.003)
+                    .range(0.0..=1.0)
+                    .custom_formatter(|n, _| format!("{n:.03}")),
+            )
+            .on_hover_text("Transparency (Alpha)");
         });
     }
 
