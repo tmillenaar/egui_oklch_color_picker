@@ -83,7 +83,7 @@ impl PopupDemo {
                     egui::vec2(500.0, 30.0),
                 ),
                 egui::Label::new(
-                    egui::RichText::new("Click any colored shape to open its color picker.")
+                    egui::RichText::new("Click a colored shape to open its color picker")
                         .size(24.0)
                         .italics(),
                 ),

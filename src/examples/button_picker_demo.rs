@@ -61,7 +61,7 @@ impl ButtonDemo {
                     egui::vec2(500.0, 30.0),
                 ),
                 egui::Label::new(
-                    egui::RichText::new("Buttons around the edge to open the color pickers")
+                    egui::RichText::new("Buttons around the edge open color pickers")
                         .size(24.0)
                         .italics(),
                 ),

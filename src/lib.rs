@@ -417,7 +417,10 @@ pub fn color_picker_oklch_2d(
 
     let (tab_changed, plot_type) = plot_type_selector(ui, ui_identifier);
 
-    let current_color_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
+    let current_color_size = vec2(
+        ui.spacing().slider_width + 64.,
+        ui.spacing().interact_size.y,
+    );
     show_srgba_unmultiplied(ui, color.to_srgba_unmultiplied(), current_color_size, 3)
         .on_hover_text("Selected color");
 

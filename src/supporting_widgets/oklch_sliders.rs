@@ -124,12 +124,13 @@ pub fn oklch_sliders(
         state.h = hue_val / 360.;
     });
 
+    // Alpha slider
     if with_alpha {
         ui.horizontal(|ui| {
             color_slider_1d_grid(
                 ui,
                 &mut state.a,
-                selected_color.h / std::f32::consts::TAU,
+                selected_color.alpha,
                 selected_color.into(),
                 |alpha| {
                     let mut color = selected_color;
@@ -143,7 +144,7 @@ pub fn oklch_sliders(
             .on_hover_text("Transparency (Alpha)");
             ui.add_sized(
                 [56.0, ui.spacing().interact_size.y],
-                DragValue::new(&mut state.l)
+                DragValue::new(&mut state.a)
                     .prefix("A: ")
                     .speed(0.003)
                     .range(0.0..=1.0)
