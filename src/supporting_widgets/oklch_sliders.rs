@@ -13,6 +13,8 @@ pub fn oklch_sliders(
     with_alpha: bool,
     ui_identifier: *const Oklch, // use pointer to color in RAM as identifier to allow for multiple color panels. They may share state if they refer to the same color
 ) -> (bool, OklchUiState) {
+    const LABEL_WIDTH: f32 = 8.0;
+
     // Recover state from cache
     let state_id = ui.id().with(("oklch_ui_state", ui_identifier));
     let mut state: OklchUiState = ui.data(|d| d.get_temp::<OklchUiState>(state_id)).unwrap();
@@ -23,6 +25,7 @@ pub fn oklch_sliders(
 
     // Lightness slider
     ui.horizontal(|ui| {
+        ui.add_sized([LABEL_WIDTH, ui.spacing().interact_size.y], Label::new("L"));
         color_slider_1d_grid(
             ui,
             &mut state.l,
@@ -40,9 +43,8 @@ pub fn oklch_sliders(
         )
         .on_hover_text("Lightness");
         ui.add_sized(
-            [56.0, ui.spacing().interact_size.y],
+            [38.0, ui.spacing().interact_size.y],
             DragValue::new(&mut state.l)
-                .prefix("L: ")
                 .speed(0.003)
                 .range(0.0..=1.0)
                 .custom_formatter(|n, _| format!("{n:.03}")),
@@ -52,6 +54,7 @@ pub fn oklch_sliders(
 
     // Chroma slider
     ui.horizontal(|ui| {
+        ui.add_sized([LABEL_WIDTH, ui.spacing().interact_size.y], Label::new("C"));
         color_slider_1d_grid(
             ui,
             &mut state.c,
@@ -70,9 +73,8 @@ pub fn oklch_sliders(
         .on_hover_text("Chroma");
         let mut chroma_val = state.c * 0.325;
         ui.add_sized(
-            [56.0, ui.spacing().interact_size.y],
+            [38.0, ui.spacing().interact_size.y],
             DragValue::new(&mut chroma_val)
-                .prefix("C: ")
                 .speed(0.003)
                 .range(0.0..=0.325)
                 .custom_formatter(|n, _| format!("{n:.03}")),
@@ -95,6 +97,7 @@ pub fn oklch_sliders(
         color
     };
     ui.horizontal(|ui| {
+        ui.add_sized([LABEL_WIDTH, ui.spacing().interact_size.y], Label::new("H"));
         color_slider_1d_grid(
             ui,
             &mut state.h,
@@ -113,9 +116,8 @@ pub fn oklch_sliders(
         .on_hover_text("Hue");
         let mut hue_val = state.h * 360.;
         ui.add_sized(
-            [56.0, ui.spacing().interact_size.y],
+            [38.0, ui.spacing().interact_size.y],
             DragValue::new(&mut hue_val)
-                .prefix("H: ")
                 .speed(1.0)
                 .range(0.0..=360.)
                 .custom_formatter(|n, _| format!("{n:.1}")),
@@ -127,6 +129,7 @@ pub fn oklch_sliders(
     // Alpha slider
     if with_alpha {
         ui.horizontal(|ui| {
+            ui.add_sized([LABEL_WIDTH, ui.spacing().interact_size.y], Label::new("A"));
             color_slider_1d_grid(
                 ui,
                 &mut state.a,
@@ -143,9 +146,8 @@ pub fn oklch_sliders(
             )
             .on_hover_text("Transparency (Alpha)");
             ui.add_sized(
-                [56.0, ui.spacing().interact_size.y],
+                [38.0, ui.spacing().interact_size.y],
                 DragValue::new(&mut state.a)
-                    .prefix("A: ")
                     .speed(0.003)
                     .range(0.0..=1.0)
                     .custom_formatter(|n, _| format!("{n:.03}")),

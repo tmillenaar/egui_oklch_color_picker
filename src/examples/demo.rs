@@ -29,7 +29,7 @@ pub struct GalleryApp {
 impl Default for GalleryApp {
     fn default() -> Self {
         Self {
-            current: DemoKind::Embedded,
+            current: DemoKind::Picker,
             demo: Demo::Picker(picker_only_demo::PickerDemo::default()),
             dark_mode: true,
         }
