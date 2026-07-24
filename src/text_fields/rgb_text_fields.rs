@@ -1,3 +1,4 @@
+use crate::oklch::Oklch;
 use crate::supporting_widgets::copy_icon::*;
 use crate::text_fields::editable_text_field::*;
 use egui::*;
@@ -48,7 +49,12 @@ impl<'a> RgbEdit<'a> {
 }
 
 impl<'a> RgbEdit<'a> {
-    pub fn ui(&mut self, ui: &mut Ui, width: f32) -> bool {
+    pub fn ui(
+        &mut self,
+        ui: &mut Ui,
+        width: f32,
+        ui_identifier: *const Oklch, // use pointer to color in RAM as identifier to allow for multiple color panels. They may share state if they refer to the same color
+    ) -> bool {
         let mut changed = false;
 
         ui.set_width(width);
@@ -70,9 +76,9 @@ impl<'a> RgbEdit<'a> {
                 let spacer = (ui.available_width() - RIGHT_GROUP_WIDTH).max(0.0);
                 ui.add_space(spacer);
 
-                changed |= self.edit_component(ui, "R", 0);
-                changed |= self.edit_component(ui, "G", 1);
-                changed |= self.edit_component(ui, "B", 2);
+                changed |= self.edit_component(ui, "R", 0, ui_identifier);
+                changed |= self.edit_component(ui, "G", 1, ui_identifier);
+                changed |= self.edit_component(ui, "B", 2, ui_identifier);
 
                 if copy_icon(ui, vec2(18.0, 18.0))
                     .on_hover_text("Click to copy RGB values")
@@ -87,8 +93,14 @@ impl<'a> RgbEdit<'a> {
         changed
     }
 
-    fn edit_component(&mut self, ui: &mut Ui, label: &str, index: usize) -> bool {
-        let id = ui.id().with(("RGB", label));
+    fn edit_component(
+        &mut self,
+        ui: &mut Ui,
+        label: &str,
+        index: usize,
+        ui_identifier: *const Oklch, // use pointer to color in RAM as identifier to allow for multiple color panels. They may share state if they refer to the same color
+    ) -> bool {
+        let id = ui.id().with(("RGB", label, ui_identifier));
 
         let (_, edit) = editable_text_field(ui, id, label, self.rgb[index].to_string(), 38.);
 

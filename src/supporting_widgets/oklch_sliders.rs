@@ -7,9 +7,14 @@ use crate::oklch_to_color32;
 use crate::oklch_ui_state::*;
 use crate::supporting_widgets::color_slider_1d_grid::color_slider_1d_grid;
 
-pub fn oklch_sliders(ui: &mut Ui, selected_color: Oklch, with_alpha: bool) -> (bool, OklchUiState) {
+pub fn oklch_sliders(
+    ui: &mut Ui,
+    selected_color: Oklch,
+    with_alpha: bool,
+    ui_identifier: *const Oklch, // use pointer to color in RAM as identifier to allow for multiple color panels. They may share state if they refer to the same color
+) -> (bool, OklchUiState) {
     // Recover state from cache
-    let state_id = ui.id().with("oklch_ui_state");
+    let state_id = ui.id().with(("oklch_ui_state", ui_identifier));
     let mut state: OklchUiState = ui.data(|d| d.get_temp::<OklchUiState>(state_id)).unwrap();
     let original_state = state.clone();
     let l = state.l;
@@ -31,6 +36,7 @@ pub fn oklch_sliders(ui: &mut Ui, selected_color: Oklch, with_alpha: bool) -> (b
             },
             None::<fn(f32) -> Color32>,
             &"lightness",
+            ui_identifier,
         )
         .on_hover_text("Lightness");
         ui.add_sized(
@@ -59,6 +65,7 @@ pub fn oklch_sliders(ui: &mut Ui, selected_color: Oklch, with_alpha: bool) -> (b
             },
             None::<fn(f32) -> Color32>,
             &"chroma",
+            ui_identifier,
         )
         .on_hover_text("Chroma");
         let mut chroma_val = state.c * 0.325;
@@ -101,6 +108,7 @@ pub fn oklch_sliders(ui: &mut Ui, selected_color: Oklch, with_alpha: bool) -> (b
             },
             Some(determine_hue_slider_colors),
             &"hue",
+            ui_identifier,
         )
         .on_hover_text("Hue");
         let mut hue_val = state.h * 360.;
@@ -130,6 +138,7 @@ pub fn oklch_sliders(ui: &mut Ui, selected_color: Oklch, with_alpha: bool) -> (b
                 },
                 None::<fn(f32) -> Color32>,
                 &"alpha",
+                ui_identifier,
             )
             .on_hover_text("Transparency (Alpha)");
             ui.add_sized(

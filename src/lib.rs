@@ -23,6 +23,8 @@ use crate::text_fields::color_text_fields::*;
 
 use std::f32::consts::TAU;
 
+use log::debug; // nocheckin
+
 use egui::*;
 use epaint::{
     StrokeKind,
@@ -208,11 +210,15 @@ pub fn color_popup_oklch_advanced(
     changed
 }
 
-fn plot_type_selector(ui: &mut Ui) -> (bool, OKLabPlotType) {
+fn plot_type_selector(
+    ui: &mut Ui,
+    ui_identifier: *const Oklch, // use pointer to color in RAM as identifier to allow for multiple color panels. They may share state if they refer to the same color
+) -> (bool, OKLabPlotType) {
     let mut tab_changed = false;
 
+    let tab_id = ui.id().with(("plot_type", ui_identifier));
     let mut tab = ui.data(|d| {
-        d.get_temp::<OKLabPlotType>(ui.id())
+        d.get_temp::<OKLabPlotType>(tab_id)
             .unwrap_or(OKLabPlotType::StableHue)
     });
 
@@ -244,15 +250,19 @@ fn plot_type_selector(ui: &mut Ui) -> (bool, OKLabPlotType) {
     });
 
     ui.data_mut(|d| {
-        d.insert_temp(ui.id(), tab.clone());
+        d.insert_temp(tab_id, tab.clone());
     });
 
     (tab_changed, tab)
 }
 
-pub fn color_picker_panel_oklch_2d(ui: &mut Ui, plot_type: OKLabPlotType) -> (bool, Oklch) {
+pub fn color_picker_panel_oklch_2d(
+    ui: &mut Ui,
+    plot_type: OKLabPlotType,
+    ui_identifier: *const Oklch, // use pointer to color in RAM as identifier to allow for multiple color panels. They may share state if they refer to the same color
+) -> (bool, Oklch) {
     // Recover state from cache
-    let state_id = ui.id().with("oklch_ui_state");
+    let state_id = ui.id().with(("oklch_ui_state", ui_identifier.clone()));
     let mut state: OklchUiState =
         ui.data(|d| d.get_temp::<OklchUiState>(state_id))
             .unwrap_or(OklchUiState {
@@ -275,17 +285,20 @@ pub fn color_picker_panel_oklch_2d(ui: &mut Ui, plot_type: OKLabPlotType) -> (bo
                 y: state.l,
             };
 
-            let (_response, update_color) = color_slider_2d::<
-                CartesianTransform,
-                StableHueProjection,
-            >(
-                ui, &mut coord, projection, "StableHueColorPicker"
-            );
+            let (_response, update_color) =
+                color_slider_2d::<CartesianTransform, StableHueProjection>(
+                    ui,
+                    &mut coord,
+                    projection,
+                    ("StableHueColorPicker", ui_identifier.clone()),
+                );
 
             state.c = coord.x.min(1.0);
             state.l = coord.y.min(1.0);
 
-            let picker_id = ui.id().with("StableHueColorPicker");
+            let picker_id = ui
+                .id()
+                .with(("StableHueColorPicker", ui_identifier.clone()));
 
             let picker = ui
                 .data(|d| d.get_temp::<StableHuePicker>(picker_id))
@@ -306,13 +319,15 @@ pub fn color_picker_panel_oklch_2d(ui: &mut Ui, plot_type: OKLabPlotType) -> (bo
                 ui,
                 &mut coord,
                 projection,
-                "StableChromaColorPicker",
+                ("StableChromaColorPicker", ui_identifier.clone()),
             );
 
             state.h = coord.angle.rem_euclid(360.0) / std::f32::consts::TAU;
             state.l = 1.0 - coord.radius.min(1.0);
 
-            let picker_id = ui.id().with("StableChromaColorPicker");
+            let picker_id = ui
+                .id()
+                .with(("StableChromaColorPicker", ui_identifier.clone()));
 
             let picker = ui
                 .data(|d| d.get_temp::<StableChromaPicker>(picker_id))
@@ -334,13 +349,15 @@ pub fn color_picker_panel_oklch_2d(ui: &mut Ui, plot_type: OKLabPlotType) -> (bo
                     ui,
                     &mut coord,
                     projection,
-                    "StableLightnessColorPicker",
+                    ("StableLightnessColorPicker", ui_identifier.clone()),
                 );
 
             state.h = (coord.angle / std::f32::consts::TAU).rem_euclid(360.0);
             state.c = coord.radius.min(1.0);
 
-            let picker_id = ui.id().with("StableLightnessColorPicker");
+            let picker_id = ui
+                .id()
+                .with(("StableLightnessColorPicker", ui_identifier.clone()));
 
             let picker = ui
                 .data(|d| d.get_temp::<StableLightnessPicker>(picker_id))
@@ -375,7 +392,9 @@ pub fn color_picker_oklch_2d(
 ) -> bool {
     ui.spacing_mut().slider_width = widget_width;
 
-    let state_id = ui.id().with("oklch_ui_state");
+    let ui_identifier = std::ptr::from_ref(color).clone();
+
+    let state_id = ui.id().with(("oklch_ui_state", ui_identifier));
 
     let alpha_state = if with_alpha { color.alpha } else { 1.0 };
     let state_from_color = OklchUiState {
@@ -396,15 +415,17 @@ pub fn color_picker_oklch_2d(
         d.insert_temp(state_id, state);
     });
 
-    let (tab_changed, plot_type) = plot_type_selector(ui);
+    let (tab_changed, plot_type) = plot_type_selector(ui, ui_identifier);
 
     let current_color_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
     show_srgba_unmultiplied(ui, color.to_srgba_unmultiplied(), current_color_size, 3)
         .on_hover_text("Selected color");
 
-    let (color_changed_in_2d_panel, new_color_opague) = color_picker_panel_oklch_2d(ui, plot_type);
+    let (color_changed_in_2d_panel, new_color_opague) =
+        color_picker_panel_oklch_2d(ui, plot_type, ui_identifier);
 
-    let (color_changed_by_sliders, new_state) = oklch_sliders(ui, new_color_opague, with_alpha);
+    let (color_changed_by_sliders, new_state) =
+        oklch_sliders(ui, new_color_opague, with_alpha, ui_identifier);
 
     if color_changed_in_2d_panel | tab_changed {
         let mut new_color = new_color_opague.clone();
@@ -428,11 +449,16 @@ pub fn color_picker_oklch_2d(
         }
     }
 
-    let (color_changed_by_text_field, new_color_from_text) =
-        color_text_fields(ui, Color32::from(new_color_opague), widget_width);
+    let (color_changed_by_text_field, new_color_from_text) = color_text_fields(
+        ui,
+        Color32::from(new_color_opague),
+        widget_width,
+        ui_identifier,
+    );
+    dbg!(color_changed_by_text_field);
     if color_changed_by_text_field {
         // Also update state indicators when color changed from direct text inserts
-        let state_id = ui.id().with("oklch_ui_state");
+        let state_id = ui.id().with(("oklch_ui_state", ui_identifier));
         let lch = color32_to_oklch(new_color_from_text);
         let state = OklchUiState {
             l: lch.l,
@@ -440,6 +466,7 @@ pub fn color_picker_oklch_2d(
             h: lch.h / std::f32::consts::TAU,
             a: new_state.a,
         };
+        log::debug!("state = {:?}", state);
         let rgba = new_color_from_text.to_array();
         *color =
             Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], (new_state.a * 255.) as u8)

@@ -128,6 +128,8 @@ fn main() -> Result<(), eframe::Error> {
 fn main() {
     use wasm_bindgen::JsCast;
 
+    eframe::WebLogger::init(log::LevelFilter::Debug).ok();
+
     wasm_bindgen_futures::spawn_local(async {
         let document = web_sys::window().unwrap().document().unwrap();
 

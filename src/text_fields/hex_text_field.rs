@@ -1,5 +1,6 @@
 use egui::*;
 
+use crate::oklch::Oklch;
 use crate::supporting_widgets::copy_icon::*;
 use crate::text_fields::editable_text_field::{NumericEdit, editable_text_field};
 
@@ -12,7 +13,12 @@ impl<'a> HexEdit<'a> {
         Self { rgb }
     }
 
-    pub fn ui(&mut self, ui: &mut Ui, width: f32) -> bool {
+    pub fn ui(
+        &mut self,
+        ui: &mut Ui,
+        width: f32,
+        ui_identifier: *const Oklch, // use pointer to color in RAM as identifier to allow for multiple color panels. They may share state if they refer to the same color
+    ) -> bool {
         let mut changed = false;
 
         ui.set_width(width);
@@ -25,7 +31,7 @@ impl<'a> HexEdit<'a> {
             let spacer = (ui.available_width() - RIGHT_GROUP_WIDTH).max(0.0);
             ui.add_space(spacer);
 
-            let id = ui.id().with(("Oklab", "Hex"));
+            let id = ui.id().with(("Oklab", "Hex", ui_identifier));
 
             let text = format!("#{:02X}{:02X}{:02X}", self.rgb[0], self.rgb[1], self.rgb[2],);
 

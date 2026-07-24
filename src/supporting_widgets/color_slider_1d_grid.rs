@@ -20,6 +20,7 @@ pub fn color_slider_1d_grid(
     color_at: impl Fn(f32) -> Oklch,
     background_color_at: Option<impl Fn(f32) -> Color32>,
     axis_name: &str,
+    ui_identifier: *const Oklch, // use pointer to color in RAM as identifier to allow for multiple color panels. They may share state if they refer to the same color
 ) -> Response {
     let desired_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());
@@ -33,7 +34,9 @@ pub fn color_slider_1d_grid(
     if ui.is_rect_visible(rect) {
         let visuals = ui.style().interact(&response);
 
-        let tex_id = ui.id().with(("color_slider_tex_1d", axis_name));
+        let tex_id = ui
+            .id()
+            .with(("color_slider_tex_1d", axis_name, ui_identifier));
 
         let mut tex = ui
             .data(|d| d.get_temp::<Option<egui::TextureHandle>>(tex_id))

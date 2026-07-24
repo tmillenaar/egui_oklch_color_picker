@@ -9,7 +9,7 @@ pub fn color_slider_2d<T, P>(
     ui: &mut Ui,
     coord: &mut T::Coord,
     projection: P,
-    ui_identifiable_label: &str,
+    ui_identifiable_label: impl std::hash::Hash,
 ) -> (Response, bool)
 where
     T: CoordinateTransform + Send + Sync + 'static,
