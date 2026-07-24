@@ -2,12 +2,14 @@ use eframe::egui;
 
 mod button_picker_demo;
 mod embedded_picker_demo;
+mod picker_only_demo;
 mod popup_picker_demo;
 
 enum Demo {
     Embedded(embedded_picker_demo::EmbeddedDemo),
     Popup(popup_picker_demo::PopupDemo),
     Button(button_picker_demo::ButtonDemo),
+    Picker(picker_only_demo::PickerDemo),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -15,6 +17,7 @@ enum DemoKind {
     Embedded,
     Popup,
     Button,
+    Picker,
 }
 
 pub struct GalleryApp {
@@ -27,7 +30,7 @@ impl Default for GalleryApp {
     fn default() -> Self {
         Self {
             current: DemoKind::Embedded,
-            demo: Demo::Embedded(embedded_picker_demo::EmbeddedDemo::default()),
+            demo: Demo::Picker(picker_only_demo::PickerDemo::default()),
             dark_mode: true,
         }
     }
@@ -45,6 +48,7 @@ impl GalleryApp {
             DemoKind::Embedded => Demo::Embedded(embedded_picker_demo::EmbeddedDemo::default()),
             DemoKind::Popup => Demo::Popup(popup_picker_demo::PopupDemo::default()),
             DemoKind::Button => Demo::Button(button_picker_demo::ButtonDemo::default()),
+            DemoKind::Picker => Demo::Picker(picker_only_demo::PickerDemo::default()),
         };
     }
 }
@@ -62,6 +66,13 @@ impl eframe::App for GalleryApp {
                 ui.heading("egui-oklab");
 
                 ui.separator();
+
+                if ui
+                    .selectable_label(self.current == DemoKind::Picker, "Picker only")
+                    .clicked()
+                {
+                    self.switch_demo(DemoKind::Picker);
+                }
 
                 if ui
                     .selectable_label(self.current == DemoKind::Embedded, "Embedded Picker")
@@ -111,6 +122,7 @@ impl eframe::App for GalleryApp {
             Demo::Embedded(app) => app.ui(ui),
             Demo::Popup(app) => app.ui(ui),
             Demo::Button(app) => app.ui(ui),
+            Demo::Picker(app) => app.ui(ui),
         });
     }
 }

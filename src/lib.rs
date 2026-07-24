@@ -455,7 +455,6 @@ pub fn color_picker_oklch_2d(
         widget_width,
         ui_identifier,
     );
-    dbg!(color_changed_by_text_field);
     if color_changed_by_text_field {
         // Also update state indicators when color changed from direct text inserts
         let state_id = ui.id().with(("oklch_ui_state", ui_identifier));
@@ -466,7 +465,6 @@ pub fn color_picker_oklch_2d(
             h: lch.h / std::f32::consts::TAU,
             a: new_state.a,
         };
-        log::debug!("state = {:?}", state);
         let rgba = new_color_from_text.to_array();
         *color =
             Color32::from_rgba_unmultiplied(rgba[0], rgba[1], rgba[2], (new_state.a * 255.) as u8)
