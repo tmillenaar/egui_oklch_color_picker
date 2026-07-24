@@ -20,7 +20,7 @@ pub fn color_slider_1d_grid(
     color_at: impl Fn(f32) -> Oklch,
     background_color_at: Option<impl Fn(f32) -> Color32>,
     axis_name: &str,
-    ui_identifier: *const Oklch, // use pointer to color in RAM as identifier to allow for multiple color panels. They may share state if they refer to the same color
+    ui_identifier: impl std::hash::Hash,
 ) -> Response {
     let desired_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());

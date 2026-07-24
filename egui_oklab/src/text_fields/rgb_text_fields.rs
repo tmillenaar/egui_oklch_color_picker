@@ -49,12 +49,7 @@ impl<'a> RgbEdit<'a> {
 }
 
 impl<'a> RgbEdit<'a> {
-    pub fn ui(
-        &mut self,
-        ui: &mut Ui,
-        width: f32,
-        ui_identifier: *const Oklch, // use pointer to color in RAM as identifier to allow for multiple color panels. They may share state if they refer to the same color
-    ) -> bool {
+    pub fn ui(&mut self, ui: &mut Ui, width: f32, ui_identifier: egui::Id) -> bool {
         let mut changed = false;
 
         ui.set_width(width);
@@ -98,7 +93,7 @@ impl<'a> RgbEdit<'a> {
         ui: &mut Ui,
         label: &str,
         index: usize,
-        ui_identifier: *const Oklch, // use pointer to color in RAM as identifier to allow for multiple color panels. They may share state if they refer to the same color
+        ui_identifier: impl std::hash::Hash,
     ) -> bool {
         let id = ui.id().with(("RGB", label, ui_identifier));
 

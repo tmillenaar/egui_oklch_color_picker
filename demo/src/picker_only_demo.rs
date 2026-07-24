@@ -21,7 +21,14 @@ impl PickerDemo {
             egui::Rect::from_center_size(content_rect.center(), egui::vec2(panel_width, 800.));
 
         ui.scope_builder(egui::UiBuilder::new().max_rect(centered_rect), |ui| {
-            color_picker_oklch_2d(ui, &mut self.color, picker_width, false, false);
+            color_picker_oklch_2d(
+                ui,
+                &mut self.color,
+                picker_width,
+                false,
+                false,
+                "the_lonely_picker",
+            );
         });
     }
 }

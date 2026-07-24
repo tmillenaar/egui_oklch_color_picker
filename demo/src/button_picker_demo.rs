@@ -70,32 +70,47 @@ impl ButtonDemo {
         egui::Area::new("top_left".into())
             .fixed_pos(content_rect.left_top() + egui::vec2(MARGIN, MARGIN))
             .show(ui.ctx(), |ui| {
-                color_edit_button_oklcha(ui, &mut self.top_left, PICKER_WIDTH);
+                color_edit_button_oklcha(ui, &mut self.top_left, PICKER_WIDTH, "top_left_picker");
             });
 
         egui::Area::new("top_right".into())
             .fixed_pos(content_rect.right_top() + egui::vec2(-MARGIN, MARGIN))
             .show(ui.ctx(), |ui| {
-                color_edit_button_oklcha(ui, &mut self.top_right, PICKER_WIDTH);
+                color_edit_button_oklcha(ui, &mut self.top_right, PICKER_WIDTH, "top_right_picker");
             });
 
         egui::Area::new("background_picker".into())
             .fixed_pos(content_rect.right_center() + egui::vec2(-MARGIN, 0.0))
             .show(ui.ctx(), |ui| {
-                color_edit_button_oklch(ui, &mut self.background, PICKER_WIDTH)
-                    .on_hover_text("Background color");
+                color_edit_button_oklch(
+                    ui,
+                    &mut self.background,
+                    PICKER_WIDTH,
+                    "background_picker",
+                )
+                .on_hover_text("Background color");
             });
 
         egui::Area::new("bottom_left".into())
             .fixed_pos(content_rect.left_bottom() + egui::vec2(MARGIN, -MARGIN * 3.))
             .show(ui.ctx(), |ui| {
-                color_edit_button_oklcha(ui, &mut self.bottom_left, PICKER_WIDTH);
+                color_edit_button_oklcha(
+                    ui,
+                    &mut self.bottom_left,
+                    PICKER_WIDTH,
+                    "bottom_left_picker",
+                );
             });
 
         egui::Area::new("bottom_right".into())
             .fixed_pos(content_rect.right_bottom() + egui::vec2(-MARGIN, -MARGIN * 3.))
             .show(ui.ctx(), |ui| {
-                color_edit_button_oklcha(ui, &mut self.bottom_right, PICKER_WIDTH);
+                color_edit_button_oklcha(
+                    ui,
+                    &mut self.bottom_right,
+                    PICKER_WIDTH,
+                    "bottom_right_picker",
+                );
             });
     }
 }

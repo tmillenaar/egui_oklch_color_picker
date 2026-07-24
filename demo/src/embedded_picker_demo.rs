@@ -66,14 +66,28 @@ impl EmbeddedDemo {
         ui.scope_builder(egui::UiBuilder::new().max_rect(left_rect), |ui| {
             ui.heading("Opaque OKLCH");
 
-            color_picker_oklch_2d(ui, &mut self.left, picker_width, false, false);
+            color_picker_oklch_2d(
+                ui,
+                &mut self.left,
+                picker_width,
+                false,
+                false,
+                "left_picker",
+            );
         });
 
         // Right picker
         ui.scope_builder(egui::UiBuilder::new().max_rect(right_rect), |ui| {
             ui.heading("OKLCH with alpha");
 
-            color_picker_oklch_2d(ui, &mut self.right, picker_width, true, false);
+            color_picker_oklch_2d(
+                ui,
+                &mut self.right,
+                picker_width,
+                true,
+                false,
+                "right_picker",
+            );
         });
 
         // Center preview

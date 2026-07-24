@@ -11,12 +11,12 @@ pub fn oklch_sliders(
     ui: &mut Ui,
     selected_color: Oklch,
     with_alpha: bool,
-    ui_identifier: *const Oklch, // use pointer to color in RAM as identifier to allow for multiple color panels. They may share state if they refer to the same color
+    ui_identifier: egui::Id,
 ) -> (bool, OklchUiState) {
     const LABEL_WIDTH: f32 = 8.0;
 
     // Recover state from cache
-    let state_id = ui.id().with(("oklch_ui_state", ui_identifier));
+    let state_id = ui_identifier.with("oklch_ui_state");
     let mut state: OklchUiState = ui.data(|d| d.get_temp::<OklchUiState>(state_id)).unwrap();
     let original_state = state.clone();
     let l = state.l;

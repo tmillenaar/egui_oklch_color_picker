@@ -18,7 +18,7 @@ pub fn color_text_fields(
     ui: &mut Ui,
     color: Color32,
     widget_width: f32,
-    ui_identifier: *const Oklch, // use pointer to color in RAM as identifier to allow for multiple color panels. They may share state if they refer to the same color
+    ui_identifier: egui::Id,
 ) -> (bool, Color32) {
     let mut changed = false;
     let mut new_color = color.clone();

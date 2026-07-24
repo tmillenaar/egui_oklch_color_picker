@@ -30,10 +30,12 @@ use epaint::{
     vec2,
 };
 
-fn color_button(ui: &mut Ui, srgba: [u8; 4], open: bool) -> Response {
+fn color_button(ui: &mut Ui, oklch: Oklch, open: bool) -> Response {
     let size = ui.spacing().interact_size;
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     response.widget_info(|| WidgetInfo::new(WidgetType::ColorButton));
+
+    let srgba = oklch.to_srgba_unmultiplied();
 
     if ui.is_rect_visible(rect) {
         let visuals = if open {
@@ -65,10 +67,15 @@ enum OKLabPlotType {
     StableHue,
 }
 
-pub fn color_edit_button_oklch(ui: &mut Ui, color: &mut Oklch, widget_width: f32) -> Response {
+pub fn color_edit_button_oklch(
+    ui: &mut Ui,
+    color: &mut Oklch,
+    widget_width: f32,
+    ui_identifier: impl std::hash::Hash,
+) -> Response {
     let mut response = color_button(
         ui,
-        color.to_srgba_unmultiplied(),
+        *color,
         Popup::is_id_open(ui.ctx(), ui.auto_id_with("popup")),
     );
 
@@ -76,7 +83,7 @@ pub fn color_edit_button_oklch(ui: &mut Ui, color: &mut Oklch, widget_width: f32
         response = response.on_hover_text("Click to edit color");
     }
 
-    if color_popup(&response, color, widget_width, false) {
+    if color_popup(&response, color, widget_width, false, ui_identifier) {
         response.mark_changed();
     }
 
@@ -88,6 +95,7 @@ fn color_popup(
     color: &mut Oklch,
     widget_width: f32,
     with_alpha: bool,
+    ui_identifier: impl std::hash::Hash,
 ) -> bool {
     let popup_id = response.id.with("popup");
 
@@ -100,7 +108,14 @@ fn color_popup(
         .show(|ui| {
             ui.spacing_mut().slider_width = widget_width;
 
-            if color_picker_oklch_2d(ui, color, widget_width, with_alpha, just_opened) {
+            if color_picker_oklch_2d(
+                ui,
+                color,
+                widget_width,
+                with_alpha,
+                just_opened,
+                ui_identifier,
+            ) {
                 changed = true;
             }
         });
@@ -108,10 +123,15 @@ fn color_popup(
     changed
 }
 
-pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Oklch, widget_width: f32) -> Response {
+pub fn color_edit_button_oklcha(
+    ui: &mut Ui,
+    color: &mut Oklch,
+    widget_width: f32,
+    ui_identifier: impl std::hash::Hash,
+) -> Response {
     let mut response = color_button(
         ui,
-        color.to_srgba_unmultiplied(),
+        *color,
         Popup::is_id_open(ui.ctx(), ui.auto_id_with("popup")),
     );
 
@@ -119,7 +139,7 @@ pub fn color_edit_button_oklcha(ui: &mut Ui, color: &mut Oklch, widget_width: f3
         response = response.on_hover_text("Click to edit color");
     }
 
-    if color_popup(&response, color, widget_width, true) {
+    if color_popup(&response, color, widget_width, true, ui_identifier) {
         response.mark_changed();
     }
 
@@ -130,6 +150,7 @@ pub fn color_popup_oklcha_simple(
     response: &Response,
     color: &mut Oklch,
     widget_width: f32,
+    ui_identifier: impl std::hash::Hash,
 ) -> bool {
     color_popup_oklcha_advanced(
         response,
@@ -137,16 +158,23 @@ pub fn color_popup_oklcha_simple(
         response.clicked(),
         color,
         widget_width,
+        ui_identifier,
     )
 }
 
-pub fn color_popup_oklch_simple(response: &Response, color: &mut Oklch, widget_width: f32) -> bool {
+pub fn color_popup_oklch_simple(
+    response: &Response,
+    color: &mut Oklch,
+    widget_width: f32,
+    ui_identifier: impl std::hash::Hash,
+) -> bool {
     color_popup_oklch_advanced(
         response,
         response.clicked(),
         response.clicked(),
         color,
         widget_width,
+        ui_identifier,
     )
 }
 
@@ -156,6 +184,7 @@ pub fn color_popup_oklcha_advanced(
     reset_state: bool,
     color: &mut Oklch,
     widget_width: f32,
+    ui_identifier: impl std::hash::Hash,
 ) -> bool {
     let mut changed = false;
 
@@ -170,7 +199,7 @@ pub fn color_popup_oklcha_advanced(
         .show(|ui| {
             ui.spacing_mut().slider_width = widget_width;
 
-            if color_picker_oklch_2d(ui, color, widget_width, true, reset_state) {
+            if color_picker_oklch_2d(ui, color, widget_width, true, reset_state, ui_identifier) {
                 changed = true;
             }
         });
@@ -184,6 +213,7 @@ pub fn color_popup_oklch_advanced(
     reset_state: bool,
     color: &mut Oklch,
     widget_width: f32,
+    ui_identifier: impl std::hash::Hash,
 ) -> bool {
     let popup_id = response.id.with("popup");
 
@@ -200,7 +230,7 @@ pub fn color_popup_oklch_advanced(
         .show(|ui| {
             ui.spacing_mut().slider_width = widget_width;
 
-            if color_picker_oklch_2d(ui, color, widget_width, false, reset_state) {
+            if color_picker_oklch_2d(ui, color, widget_width, false, reset_state, ui_identifier) {
                 changed = true;
             }
         });
@@ -208,10 +238,7 @@ pub fn color_popup_oklch_advanced(
     changed
 }
 
-fn plot_type_selector(
-    ui: &mut Ui,
-    ui_identifier: *const Oklch, // use pointer to color in RAM as identifier to allow for multiple color panels. They may share state if they refer to the same color
-) -> (bool, OKLabPlotType) {
+fn plot_type_selector(ui: &mut Ui, ui_identifier: impl std::hash::Hash) -> (bool, OKLabPlotType) {
     let mut tab_changed = false;
 
     let tab_id = ui.id().with(("plot_type", ui_identifier));
@@ -257,10 +284,10 @@ fn plot_type_selector(
 pub fn color_picker_panel_oklch_2d(
     ui: &mut Ui,
     plot_type: OKLabPlotType,
-    ui_identifier: *const Oklch, // use pointer to color in RAM as identifier to allow for multiple color panels. They may share state if they refer to the same color
+    ui_identifier: egui::Id,
 ) -> (bool, Oklch) {
     // Recover state from cache
-    let state_id = ui.id().with(("oklch_ui_state", ui_identifier.clone()));
+    let state_id = ui_identifier.with("oklch_ui_state");
     let mut state: OklchUiState =
         ui.data(|d| d.get_temp::<OklchUiState>(state_id))
             .unwrap_or(OklchUiState {
@@ -288,15 +315,13 @@ pub fn color_picker_panel_oklch_2d(
                     ui,
                     &mut coord,
                     projection,
-                    ("StableHueColorPicker", ui_identifier.clone()),
+                    ("StableHueColorPicker", ui_identifier),
                 );
 
             state.c = coord.x.min(1.0);
             state.l = coord.y.min(1.0);
 
-            let picker_id = ui
-                .id()
-                .with(("StableHueColorPicker", ui_identifier.clone()));
+            let picker_id = ui.id().with(("StableHueColorPicker", ui_identifier));
 
             let picker = ui
                 .data(|d| d.get_temp::<StableHuePicker>(picker_id))
@@ -317,15 +342,13 @@ pub fn color_picker_panel_oklch_2d(
                 ui,
                 &mut coord,
                 projection,
-                ("StableChromaColorPicker", ui_identifier.clone()),
+                ("StableChromaColorPicker", ui_identifier),
             );
 
             state.h = coord.angle.rem_euclid(360.0) / std::f32::consts::TAU;
             state.l = 1.0 - coord.radius.min(1.0);
 
-            let picker_id = ui
-                .id()
-                .with(("StableChromaColorPicker", ui_identifier.clone()));
+            let picker_id = ui.id().with(("StableChromaColorPicker", ui_identifier));
 
             let picker = ui
                 .data(|d| d.get_temp::<StableChromaPicker>(picker_id))
@@ -347,15 +370,13 @@ pub fn color_picker_panel_oklch_2d(
                     ui,
                     &mut coord,
                     projection,
-                    ("StableLightnessColorPicker", ui_identifier.clone()),
+                    ("StableLightnessColorPicker", ui_identifier),
                 );
 
             state.h = (coord.angle / std::f32::consts::TAU).rem_euclid(360.0);
             state.c = coord.radius.min(1.0);
 
-            let picker_id = ui
-                .id()
-                .with(("StableLightnessColorPicker", ui_identifier.clone()));
+            let picker_id = ui.id().with(("StableLightnessColorPicker", ui_identifier));
 
             let picker = ui
                 .data(|d| d.get_temp::<StableLightnessPicker>(picker_id))
@@ -387,12 +408,13 @@ pub fn color_picker_oklch_2d(
     widget_width: f32,
     with_alpha: bool,
     reset_state: bool,
+    ui_identifier: impl std::hash::Hash,
 ) -> bool {
+    let ui_identifier = ui.id().with(ui_identifier);
+
     ui.spacing_mut().slider_width = widget_width;
 
-    let ui_identifier = std::ptr::from_ref(color).clone();
-
-    let state_id = ui.id().with(("oklch_ui_state", ui_identifier));
+    let state_id = ui_identifier.with("oklch_ui_state");
 
     let alpha_state = if with_alpha { color.alpha } else { 1.0 };
     let state_from_color = OklchUiState {
@@ -409,6 +431,8 @@ pub fn color_picker_oklch_2d(
         state = state_from_color;
     }
 
+    let color_from_state = state.to_oklch();
+
     ui.data_mut(|d| {
         d.insert_temp(state_id, state);
     });
@@ -419,8 +443,31 @@ pub fn color_picker_oklch_2d(
         ui.spacing().slider_width + 64.,
         ui.spacing().interact_size.y,
     );
-    show_srgba_unmultiplied(ui, color.to_srgba_unmultiplied(), current_color_size, 3)
-        .on_hover_text("Selected color");
+    let label = if color_from_state.is_valid_srgb() {
+        None
+    } else {
+        Some("Fallback color!")
+    };
+    let color_display_response = show_srgba_unmultiplied(
+        ui,
+        color.to_srgba_unmultiplied(),
+        current_color_size,
+        3,
+        label,
+    )
+    .on_hover_text("Selected color -- click to snap to this color (snap to fallback)");
+
+    if color_display_response.clicked() {
+        state = OklchUiState {
+            l: color.l,
+            c: color.c / 0.325,
+            h: color.h / TAU,
+            a: if with_alpha { color.alpha } else { 1.0 },
+        };
+        ui.data_mut(|d| {
+            d.insert_temp(state_id, state);
+        });
+    }
 
     let (color_changed_in_2d_panel, new_color_opague) =
         color_picker_panel_oklch_2d(ui, plot_type, ui_identifier);
@@ -443,7 +490,6 @@ pub fn color_picker_oklch_2d(
         if oklch.is_valid_srgb() {
             *color = oklch;
         } else {
-            // TODO: Fallback color using 2d panel
             let mut new_color = new_color_opague.clone();
             new_color.alpha = new_state.a;
             *color = new_color;
@@ -458,7 +504,7 @@ pub fn color_picker_oklch_2d(
     );
     if color_changed_by_text_field {
         // Also update state indicators when color changed from direct text inserts
-        let state_id = ui.id().with(("oklch_ui_state", ui_identifier));
+        let state_id = ui_identifier.with("oklch_ui_state");
         let lch = color32_to_oklch(new_color_from_text);
         let state = OklchUiState {
             l: lch.l,

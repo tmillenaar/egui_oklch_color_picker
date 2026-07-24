@@ -26,12 +26,16 @@ fn editable_rect(
     rect: egui::Rect,
     color: &mut Oklch,
     picker_width: f32,
-    id_source: impl std::hash::Hash,
+    id_source_name: &str,
     with_alpha: bool,
 ) {
     const CORNER_ROUNDING: u8 = 24;
 
-    let response = ui.interact(rect, ui.make_persistent_id(id_source), egui::Sense::click());
+    let response = ui.interact(
+        rect,
+        ui.make_persistent_id(id_source_name.clone()),
+        egui::Sense::click(),
+    );
 
     if response.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
@@ -53,6 +57,7 @@ fn editable_rect(
             response.clicked(),
             color,
             picker_width,
+            id_source_name,
         );
     } else {
         color_popup_oklch_advanced(
@@ -61,6 +66,7 @@ fn editable_rect(
             response.clicked(),
             color,
             picker_width,
+            id_source_name,
         );
     }
 }
