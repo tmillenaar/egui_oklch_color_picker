@@ -1,6 +1,10 @@
 use eframe::egui;
+use serde::{Deserialize, Serialize};
+
 use egui_oklab::{color_picker_oklch_2d, oklch::Oklch};
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct PickerDemo {
     color: Oklch,
 }

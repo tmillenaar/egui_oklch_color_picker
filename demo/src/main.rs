@@ -1,4 +1,5 @@
 use eframe::egui;
+use serde::{Deserialize, Serialize};
 
 mod button_picker_demo;
 mod credits;
@@ -8,6 +9,7 @@ mod popup_picker_demo;
 
 use crate::credits::credit_footer;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 enum Demo {
     Embedded(embedded_picker_demo::EmbeddedDemo),
     Popup(popup_picker_demo::PopupDemo),
@@ -15,7 +17,7 @@ enum Demo {
     Picker(picker_only_demo::PickerDemo),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq)]
 enum DemoKind {
     Embedded,
     Popup,
@@ -23,9 +25,16 @@ enum DemoKind {
     Picker,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct GalleryApp {
     current: DemoKind,
-    demo: Demo,
+
+    embedded: embedded_picker_demo::EmbeddedDemo,
+    popup: popup_picker_demo::PopupDemo,
+    button: button_picker_demo::ButtonDemo,
+    picker: picker_only_demo::PickerDemo,
+
     dark_mode: bool,
 }
 
@@ -33,7 +42,10 @@ impl Default for GalleryApp {
     fn default() -> Self {
         Self {
             current: DemoKind::Picker,
-            demo: Demo::Picker(picker_only_demo::PickerDemo::default()),
+            embedded: embedded_picker_demo::EmbeddedDemo::default(),
+            popup: popup_picker_demo::PopupDemo::default(),
+            button: button_picker_demo::ButtonDemo::default(),
+            picker: picker_only_demo::PickerDemo::default(),
             dark_mode: true,
         }
     }
@@ -44,19 +56,15 @@ impl GalleryApp {
         if demo == self.current {
             return;
         }
-
         self.current = demo;
-
-        self.demo = match demo {
-            DemoKind::Embedded => Demo::Embedded(embedded_picker_demo::EmbeddedDemo::default()),
-            DemoKind::Popup => Demo::Popup(popup_picker_demo::PopupDemo::default()),
-            DemoKind::Button => Demo::Button(button_picker_demo::ButtonDemo::default()),
-            DemoKind::Picker => Demo::Picker(picker_only_demo::PickerDemo::default()),
-        };
     }
 }
 
 impl eframe::App for GalleryApp {
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, eframe::APP_KEY, self);
+    }
+
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         ctx.set_visuals(if self.dark_mode {
             egui::Visuals::dark()
@@ -132,11 +140,11 @@ impl eframe::App for GalleryApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             let content_rect = ui.max_rect();
 
-            match &mut self.demo {
-                Demo::Embedded(app) => app.ui(ui, content_rect),
-                Demo::Popup(app) => app.ui(ui, content_rect),
-                Demo::Button(app) => app.ui(ui, content_rect),
-                Demo::Picker(app) => app.ui(ui, content_rect),
+            match self.current {
+                DemoKind::Embedded => self.embedded.ui(ui, content_rect),
+                DemoKind::Popup => self.popup.ui(ui, content_rect),
+                DemoKind::Button => self.button.ui(ui, content_rect),
+                DemoKind::Picker => self.picker.ui(ui, content_rect),
             }
         });
     }
@@ -147,7 +155,13 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         "egui-oklab Demo Gallery",
         eframe::NativeOptions::default(),
-        Box::new(|_| Ok(Box::new(GalleryApp::default()))),
+        Box::new(|cc| {
+            Ok(Box::new(if let Some(storage) = cc.storage {
+                eframe::get_value(storage, eframe::APP_KEY).unwrap_or_default()
+            } else {
+                GalleryApp::default()
+            }))
+        }),
     )
 }
 

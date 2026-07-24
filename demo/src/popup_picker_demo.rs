@@ -1,6 +1,10 @@
 use eframe::egui;
+use serde::{Deserialize, Serialize};
+
 use egui_oklab::{color_popup_oklch_advanced, color_popup_oklcha_advanced, oklch::Oklch};
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct PopupDemo {
     top_left: Oklch,
     top_right: Oklch,

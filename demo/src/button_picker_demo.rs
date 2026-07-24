@@ -1,6 +1,10 @@
 use eframe::egui;
+use serde::{Deserialize, Serialize};
+
 use egui_oklab::{color_edit_button_oklch, color_edit_button_oklcha, oklch::Oklch};
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct ButtonDemo {
     top_left: Oklch,
     top_right: Oklch,

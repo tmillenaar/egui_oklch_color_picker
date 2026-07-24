@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 egui = "0.33"
 fast-math = "0.1"
+serde = { version = "1", optional = true, features = ["derive"] }
