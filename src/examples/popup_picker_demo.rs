@@ -66,20 +66,19 @@ fn editable_rect(
 }
 
 impl PopupDemo {
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, content_rect: egui::Rect) {
         const PICKER_WIDTH: f32 = 380.0;
 
-        let rect = ui.available_rect_before_wrap();
-        let center = rect.center();
+        let center = content_rect.center();
 
         let bg_size = egui::vec2(420.0, 420.0);
         let fg_size = egui::vec2(180.0, 180.0);
         let offset = 70.0;
 
-        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(content_rect), |ui| {
             ui.put(
                 egui::Rect::from_center_size(
-                    rect.center_top() + egui::vec2(0.0, 30.0),
+                    content_rect.center_top() + egui::vec2(0.0, 30.0),
                     egui::vec2(500.0, 30.0),
                 ),
                 egui::Label::new(

@@ -22,19 +22,18 @@ impl Default for ButtonDemo {
 }
 
 impl ButtonDemo {
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, content_rect: egui::Rect) {
         const PICKER_WIDTH: f32 = 380.0;
         const MARGIN: f32 = 10.0;
 
-        let rect = ui.available_rect_before_wrap();
         let painter = ui.painter();
 
-        let center = rect.center();
+        let center = content_rect.center();
 
         let radius = 110.0;
         let offset = 70.0;
 
-        painter.rect_filled(rect, 0.0, ui.visuals().panel_fill);
+        painter.rect_filled(content_rect, 0.0, ui.visuals().panel_fill);
 
         painter.circle_filled(center, radius * 2.5, self.background);
 
@@ -54,10 +53,10 @@ impl ButtonDemo {
             self.bottom_right,
         );
 
-        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(content_rect), |ui| {
             ui.put(
                 egui::Rect::from_center_size(
-                    rect.center_top() + egui::vec2(0.0, 30.0),
+                    content_rect.center_top() + egui::vec2(0.0, 30.0),
                     egui::vec2(500.0, 30.0),
                 ),
                 egui::Label::new(
@@ -69,32 +68,32 @@ impl ButtonDemo {
         });
 
         egui::Area::new("top_left".into())
-            .fixed_pos(rect.left_top() + egui::vec2(MARGIN, MARGIN))
+            .fixed_pos(content_rect.left_top() + egui::vec2(MARGIN, MARGIN))
             .show(ui.ctx(), |ui| {
                 color_edit_button_oklcha(ui, &mut self.top_left, PICKER_WIDTH);
             });
 
         egui::Area::new("top_right".into())
-            .fixed_pos(rect.right_top() + egui::vec2(-MARGIN, MARGIN))
+            .fixed_pos(content_rect.right_top() + egui::vec2(-MARGIN, MARGIN))
             .show(ui.ctx(), |ui| {
                 color_edit_button_oklcha(ui, &mut self.top_right, PICKER_WIDTH);
             });
 
         egui::Area::new("background_picker".into())
-            .fixed_pos(rect.right_center() + egui::vec2(-MARGIN, 0.0))
+            .fixed_pos(content_rect.right_center() + egui::vec2(-MARGIN, 0.0))
             .show(ui.ctx(), |ui| {
                 color_edit_button_oklch(ui, &mut self.background, PICKER_WIDTH)
                     .on_hover_text("Background color");
             });
 
         egui::Area::new("bottom_left".into())
-            .fixed_pos(rect.left_bottom() + egui::vec2(MARGIN, -MARGIN))
+            .fixed_pos(content_rect.left_bottom() + egui::vec2(MARGIN, -MARGIN * 3.))
             .show(ui.ctx(), |ui| {
                 color_edit_button_oklcha(ui, &mut self.bottom_left, PICKER_WIDTH);
             });
 
         egui::Area::new("bottom_right".into())
-            .fixed_pos(rect.right_bottom() + egui::vec2(-MARGIN, -MARGIN))
+            .fixed_pos(content_rect.right_bottom() + egui::vec2(-MARGIN, -MARGIN * 3.))
             .show(ui.ctx(), |ui| {
                 color_edit_button_oklcha(ui, &mut self.bottom_right, PICKER_WIDTH);
             });

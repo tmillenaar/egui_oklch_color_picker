@@ -6,8 +6,6 @@ fn modulus(val: f32, modulus: f32) -> f32 {
 }
 
 pub fn background_checkers(painter: &Painter, rect: Rect, ny: u32) {
-    let rect = rect.shrink(0.5); // Small hack to avoid the checkers from peeking through the sides
-
     let dark_color = Color32::from_gray(90);
     let bright_color = Color32::from_gray(190);
 

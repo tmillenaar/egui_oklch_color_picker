@@ -16,19 +16,15 @@ impl Default for EmbeddedDemo {
 }
 
 impl EmbeddedDemo {
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, content_rect: egui::Rect) {
         let picker_width = (ui.available_width() * 0.28).clamp(180.0, 380.0);
         let panel_width = picker_width + 80.0;
         const HEADER_HEIGHT: f32 = 48.0;
 
-        let rect = ui.available_rect_before_wrap();
-
-        //
         // Header
-        //
         let header_rect = egui::Rect::from_min_max(
-            rect.left_top(),
-            egui::pos2(rect.right(), rect.top() + HEADER_HEIGHT),
+            content_rect.left_top(),
+            egui::pos2(content_rect.right(), content_rect.top() + HEADER_HEIGHT),
         );
 
         ui.scope_builder(egui::UiBuilder::new().max_rect(header_rect), |ui| {
@@ -37,7 +33,7 @@ impl EmbeddedDemo {
 
                 ui.label(
                     egui::RichText::new(
-                        "Permanent panels on the sides control the colors in the center.",
+                        "Permanent panels on the sides control the colors in the center",
                     )
                     .size(20.0)
                     .italics(),
@@ -45,12 +41,10 @@ impl EmbeddedDemo {
             });
         });
 
-        //
         // Remaining content
-        //
         let content = egui::Rect::from_min_max(
-            egui::pos2(rect.left(), header_rect.bottom()),
-            rect.right_bottom(),
+            egui::pos2(content_rect.left(), header_rect.bottom()),
+            content_rect.right_bottom(),
         );
 
         let left_rect = egui::Rect::from_min_max(
@@ -68,27 +62,21 @@ impl EmbeddedDemo {
             egui::pos2(right_rect.left(), content.bottom()),
         );
 
-        //
         // Left picker
-        //
         ui.scope_builder(egui::UiBuilder::new().max_rect(left_rect), |ui| {
             ui.heading("Opaque OKLCH");
 
             color_picker_oklch_2d(ui, &mut self.left, picker_width, false, false);
         });
 
-        //
         // Right picker
-        //
         ui.scope_builder(egui::UiBuilder::new().max_rect(right_rect), |ui| {
             ui.heading("OKLCH with alpha");
 
             color_picker_oklch_2d(ui, &mut self.right, picker_width, true, false);
         });
 
-        //
         // Center preview
-        //
         ui.scope_builder(egui::UiBuilder::new().max_rect(center_rect), |ui| {
             let rect = ui.max_rect();
             let painter = ui.painter();

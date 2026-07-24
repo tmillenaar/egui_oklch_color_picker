@@ -14,13 +14,13 @@ impl Default for PickerDemo {
 }
 
 impl PickerDemo {
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, content_rect: egui::Rect) {
         let picker_width = (ui.available_width() * 0.28).clamp(180.0, 380.0);
         let panel_width = picker_width + 80.0;
 
         let available_rect = ui.available_rect_before_wrap();
-        let content_rect =
-            egui::Rect::from_center_size(available_rect.center(), egui::vec2(panel_width, 800.));
+        // let content_rect =
+        //     egui::Rect::from_center_size(available_rect.center(), egui::vec2(panel_width, 800.));
 
         ui.scope_builder(egui::UiBuilder::new().max_rect(content_rect), |ui| {
             ui.heading("OKLCH");

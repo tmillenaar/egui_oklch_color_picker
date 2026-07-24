@@ -1,9 +1,12 @@
 use eframe::egui;
 
 mod button_picker_demo;
+mod credits;
 mod embedded_picker_demo;
 mod picker_only_demo;
 mod popup_picker_demo;
+
+use crate::credits::credit_footer;
 
 enum Demo {
     Embedded(embedded_picker_demo::EmbeddedDemo),
@@ -118,11 +121,23 @@ impl eframe::App for GalleryApp {
             });
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| match &mut self.demo {
-            Demo::Embedded(app) => app.ui(ui),
-            Demo::Popup(app) => app.ui(ui),
-            Demo::Button(app) => app.ui(ui),
-            Demo::Picker(app) => app.ui(ui),
+        // Note: show bottom panel before central panel, otherwise the central panel does not know it's size.
+        //       This is because we render the bottom panel from bottom to top.
+        egui::TopBottomPanel::bottom("credits")
+            .resizable(false)
+            .show(ctx, |ui| {
+                credit_footer(ui);
+            });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let content_rect = ui.max_rect();
+
+            match &mut self.demo {
+                Demo::Embedded(app) => app.ui(ui, content_rect),
+                Demo::Popup(app) => app.ui(ui, content_rect),
+                Demo::Button(app) => app.ui(ui, content_rect),
+                Demo::Picker(app) => app.ui(ui, content_rect),
+            }
         });
     }
 }
