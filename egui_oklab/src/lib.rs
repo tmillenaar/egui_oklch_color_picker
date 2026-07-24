@@ -23,8 +23,6 @@ use crate::text_fields::color_text_fields::*;
 
 use std::f32::consts::TAU;
 
-use log::debug; // nocheckin
-
 use egui::*;
 use epaint::{
     StrokeKind,

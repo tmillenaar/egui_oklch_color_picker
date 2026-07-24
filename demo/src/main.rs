@@ -112,11 +112,11 @@ impl eframe::App for GalleryApp {
 
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    ui.separator();
-
-                    if ui.button("Quit").clicked() {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Quit").clicked() {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    });
                 }
             });
         });
