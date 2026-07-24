@@ -4,8 +4,8 @@ use egui::*;
 use crate::oklch::*;
 use crate::supporting_widgets::background_checkers::*;
 
-fn contrast_color(color: impl Into<Rgba>) -> Color32 {
-    if color.into().intensity() < 0.5 {
+fn contrast_color(color: impl Into<Oklch>) -> Color32 {
+    if color.into().l < 0.45 {
         Color32::WHITE
     } else {
         Color32::BLACK
