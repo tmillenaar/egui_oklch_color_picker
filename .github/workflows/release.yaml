@@ -1,9 +1,12 @@
 name: Deploy Demo
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
+    inputs:
+      public_url:
+        description: "Public URL"
+        required: true
+        default: "/oklch_color_picker/"
 
 jobs:
   deploy:
