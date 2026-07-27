@@ -131,6 +131,8 @@ impl eframe::App for GalleryApp {
 
         // Note: show bottom panel before central panel, otherwise the central panel does not know it's size.
         //       This is because we render the bottom panel from bottom to top.
+        // Note: only show the credits panel on local build since the web version has the credits in the html
+        #[cfg(not(target_arch = "wasm32"))]
         egui::TopBottomPanel::bottom("credits")
             .resizable(false)
             .show(ctx, |ui| {

@@ -2,12 +2,32 @@
 <html lang="en">
 <head>
     <meta charset="utf-8" />
+
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
     />
 
-    <title>egui-oklab Demo Gallery</title>
+    <title>OKLCH Color Picker – Interactive OKLAB Color Explorer</title>
+
+    <meta
+        name="description"
+        content="A free interactive OKLCH and OKLAB color picker. Explore perceptual color spaces, create beautiful color palettes, visualize gamut limits, and convert colors directly in your browser."
+    />
+
+    <meta
+        name="keywords"
+        content="OKLCH, OKLAB, color picker, color converter, css color, perceptual color, color palette, color explorer, color visualization"
+    />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Interactive OKLCH Color Picker" />
+    <meta
+        property="og:description"
+        content="Explore OKLCH and OKLAB with an interactive browser-based color picker."
+    />
+
+    <meta name="theme-color" content="#202124" />
 
     <style>
         html,
@@ -15,22 +35,191 @@
             margin: 0;
             width: 100%;
             height: 100%;
-            overflow: hidden;
             background: #202124;
+            color: #eeeeee;
+            font-family:
+                system-ui,
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
         }
 
         canvas {
             display: block;
             width: 100%;
-            height: 100%;
+            height: 95vh;
             outline: none;
         }
+
+        body.running canvas {
+            position: fixed;
+            inset: 0;
+        }
+
+        #intro {
+            box-sizing: border-box;
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1.5rem 2rem;
+            line-height: 1.7;
+        }
+
+        #intro h1,
+        #intro h2 {
+            line-height: 1.2;
+        }
+
+        #intro p,
+        #intro li {
+            max-width: 70ch;
+        }
+
+        details {
+            margin-top: 1rem;
+        }
+
+
+        summary {
+            cursor: pointer;
+            font-weight: 600;
+            text-align: center;
+        }
+
+        .details-content {
+            max-width: 800px;
+            margin: 0 auto;
+            line-height: 1.7;
+        }
+
+        details[open] summary {
+            margin-bottom: 1.5rem;
+        }
+
+        summary {
+            cursor: pointer;
+            font-weight: 600;
+        }
+
     </style>
 </head>
 
 <body>
+
     <canvas id="the_canvas"></canvas>
 
+    <main id="intro">
+        <details>
+            <summary>Learn more about tool</summary>
+
+            <h1>Interactive OKLCH Color Picker</h1>
+
+            <p>
+                Explore the modern OKLCH and OKLAB color spaces with an interactive color picker.
+            </p>
+
+            <p>
+                This is a free interactive color picker for the modern
+                <strong>OKLCH</strong> and <strong>OKLAB</strong> color spaces.
+                Experiment with perceptually uniform colors directly in your browser,
+                compare colors, explore hue and chroma, and create better color
+                palettes for design, visualization, and user interfaces.
+            </p>
+
+            <h2>Why OKLCH?</h2>
+
+            <p>
+                Unlike RGB, HSL, or HSV, the OKLCH color space was designed to be
+                perceptually uniform. Equal changes in lightness, chroma, or hue
+                produce much more predictable visual results, making it an excellent
+                choice for modern user interfaces, data visualization, branding, and
+                accessible color design.
+            </p>
+
+            <h2>Features</h2>
+
+            <ul>
+                <li>Interactive OKLCH color picker</li>
+                <li>Explore the OKLAB color space</li>
+                <li>Create perceptually uniform color palettes</li>
+                <li>Visualize lightness, chroma, and hue</li>
+                <li>Modern CSS color support</li>
+                <li>Runs entirely in your browser</li>
+            </ul>
+
+            <h2>Who is this tool for?</h2>
+
+            <p>
+                This tool is intended for designers, developers, researchers, and
+                anyone interested in modern color science. Whether you're creating
+                accessible interfaces, simply learning about perceptual
+                color spaces, this application provides an interactive environment
+                for exploration. For most users, the first tab containing the color
+                picker is all you'll need. The remaining tabs showcase additional
+                features and demonstrate how the egui extension can be embedded
+                into Rust applications.
+            </p>
+
+            <section>
+                <h2>About this project</h2>
+
+                <p>
+                    This interactive color picker is a demonstration of the
+                    <a href="https://github.com/tmillenaar/egui_oklab">egui_oklab</a>
+                    Rust library. The repository contains the reusable widgets and utilities
+                    needed to integrate modern <strong>OKLCH</strong> and <strong>Oklab</strong>
+                    color pickers into applications built with
+                    <a href="https://github.com/emilk/egui">egui</a>. This website serves as a
+                    live showcase of the library's capabilities and allows you to experiment
+                    with the widgets directly in your browser.
+                </p>
+
+                <h2>Credits</h2>
+
+                <p>
+                    The user interface is built with
+                    <a href="https://github.com/emilk/egui">egui</a> and
+                    <a href="https://github.com/emilk/egui/tree/master/crates/eframe">eframe</a>,
+                    enabling the application to run natively and on the web through
+                    WebAssembly.
+                </p>
+
+                <p>
+                    The design of the primary color picker was inspired by
+                    <a href="https://www.youtube.com/watch?v=fSnltHozDcU">
+                        A Better Way To Color Pick
+                    </a>
+                    and the
+                    <a href="https://github.com/gibapiu/oklab_colour_picker_krita">
+                        oklab_colour_picker_krita
+                    </a>
+                    project for Krita.
+                </p>
+
+                <p>
+                    If you're interested in learning more about the
+                    <strong>OKLCH</strong> color space, a great starting point is
+                    <a href="https://oklch.fyi/">oklch.fyi</a>, which provides an accessible
+                    introduction to perceptually uniform color spaces and modern CSS color
+                    workflows.
+                </p>
+            </section>
+
+            <noscript>
+                <h2>JavaScript Required</h2>
+
+                <p>
+                    This application is implemented as a WebAssembly application and
+                    requires JavaScript to run. Please enable JavaScript to use the
+                    interactive color picker.
+                </p>
+            </noscript>
+
+        </details>
+
+    </main>
+
     <link data-trunk rel="rust" />
+
 </body>
 </html>
