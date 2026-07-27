@@ -11,21 +11,28 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    container:
-          image: ghcr.io/trunk-rs/trunk:latest
 
     defaults:
       run:
         working-directory: demo
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Trunk
+        run: cargo install --locked trunk
 
       - name: Build
+        working-directory: demo
         run: trunk build --release --public-url /oklch_color_picker/
 
-      - name: Deploy via FTP
+      - name: Deploy
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_HOST }}
@@ -33,4 +40,3 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           local-dir: demo/dist/
           server-dir: /domains/timomillenaar.nl/public_html/oklch_color_picker/
-          dangerous-clean-slate: false
