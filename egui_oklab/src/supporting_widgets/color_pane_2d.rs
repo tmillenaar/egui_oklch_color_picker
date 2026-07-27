@@ -139,7 +139,12 @@ where
         }
     }
 
-    if response.is_pointer_button_down_on() {
+    // FIXME: On mutlitouch devices, we need to delay the selection of the color to
+    //        prevent the user from accidentally selecting colors when panning/zooming
+    let is_multitouch = response.ctx.input(|i| i.multi_touch().is_some());
+    if !is_multitouch
+        && response.ctx.input(|i| i.pointer.button_down(PointerButton::Primary))
+    {
         ui.ctx().set_cursor_icon(egui::CursorIcon::None);
     }
 

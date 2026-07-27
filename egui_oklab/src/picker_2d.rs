@@ -222,6 +222,22 @@ where
             self.viewport[3] += dy_world;
         }
 
+        // Pan from touch
+        if let Some(mt) = response.ctx.input(|i| i.multi_touch()) {
+            let drag = mt.translation_delta;
+
+            let dx_world = drag.x / rect.width() * width;
+            let dy_world = drag.y / rect.height() * height;
+
+            self.viewport[0] -= dx_world;
+            self.viewport[2] -= dx_world;
+
+            self.viewport[1] += dy_world;
+            self.viewport[3] += dy_world;
+
+            viewport_changed = true;
+        }
+
         // Zoom
         let scroll = response.ctx.input(|i| i.raw_scroll_delta.y);
 
@@ -257,6 +273,25 @@ where
                 self.viewport[1] = world.y + (self.viewport[1] - world.y) * zoom_factor;
                 self.viewport[3] = world.y + (self.viewport[3] - world.y) * zoom_factor;
             }
+        }
+
+        // Zoom from touch
+        if let Some(mt) = response.ctx.input(|i| i.multi_touch()) {
+            let zoom_factor = mt.zoom_delta;
+
+            let local = Pos2 {
+                x: mt.center_pos.x - rect.left(),
+                y: mt.center_pos.y - rect.top(),
+            };
+
+            let world = self.pixel_to_world(local);
+
+            self.viewport[0] = world.x + (self.viewport[0] - world.x) / zoom_factor;
+            self.viewport[2] = world.x + (self.viewport[2] - world.x) / zoom_factor;
+            self.viewport[1] = world.y + (self.viewport[1] - world.y) / zoom_factor;
+            self.viewport[3] = world.y + (self.viewport[3] - world.y) / zoom_factor;
+
+            viewport_changed = true;
         }
 
         if viewport_changed {
