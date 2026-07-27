@@ -1,3 +1,27 @@
+//! # Embedded color picker example
+//!
+//! This example demonstrates the simplest way to embed the
+//! [`egui_oklab::color_picker_oklch_2d`] widget directly into an `egui`
+//! interface.
+//!
+//! The application stores a single [`egui_oklab::oklch::Oklch`] color in its
+//! state and passes it to the picker each frame. As the user interacts with
+//! the widget, the selected color is updated in place.
+//!
+//! The important parts of this example are:
+//!
+//! - Storing the selected color as an [`Oklch`] value.
+//! - Calling [`color_picker_oklch_2d`] from your UI code.
+//! - Choosing a suitable width for the picker based on the available space.
+//! - Providing a stable identifier so the picker can preserve its interaction
+//!   state between frames.
+//!
+//! This approach is ideal for settings panels, inspectors, asset editors, or
+//! any application where the color picker is intended to remain visible rather
+//! than appearing in a popup.
+//!
+//! See [`PickerDemo::ui`] for the complete implementation.
+
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 

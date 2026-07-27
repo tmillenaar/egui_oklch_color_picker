@@ -1,13 +1,29 @@
+//! # egui_oklab Demo Gallery
+//!
+//! This crate contains complete example applications demonstrating the
+//! widgets provided by `egui_oklab`.
+//!
+//! ## Examples
+//!
+//! - [`picker_only_demo`] — Embed a standalone color picker into an existing UI.
+//! - [`button_picker_demo`] — Use compact color buttons that open popup pickers.
+//! - [`popup_picker_demo`] — Attach color pickers to arbitrary widgets.
+//! - [`embedded_picker_demo`] — A larger application embedding the picker in a layout.
+//!
+//! Each module contains a complete, self-contained example that can be copied
+//! into your own application.
+
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
-mod button_picker_demo;
 mod credits;
-mod embedded_picker_demo;
-mod picker_only_demo;
-mod popup_picker_demo;
-
 use crate::credits::credit_footer;
+use egui_oklab_demo::{
+    button_picker_demo,
+    embedded_picker_demo,
+    picker_only_demo,
+    popup_picker_demo,
+};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 enum Demo {

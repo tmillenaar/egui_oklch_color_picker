@@ -1,3 +1,18 @@
+//! # Color button example
+//!
+//! Demonstrates the high-level button widgets.
+//!
+//! Use this approach when your application already has a visual
+//! representation of a color and you simply want clicking it to
+//! open a picker.
+//!
+//! This example shows:
+//!
+//! - `color_edit_button_oklch()`
+//! - `color_edit_button_oklcha()`
+//! - multiple independent pickers
+//! - unique picker identifiers
+
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 

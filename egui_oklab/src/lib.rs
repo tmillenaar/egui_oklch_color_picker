@@ -1,3 +1,61 @@
+//! # egui OKLCH Color Picker
+//!
+//! This is an interactive color picker widget for `egui` in the OKLCH color space featuring perceptually
+//! uniform color editing, multiple 2D projection modes, sliders, text input,
+//! and popup color editors.
+//!
+//! This crate is intended for applications that want perceptually uniform
+//! color selection, unlike traditional RGB or HSV pickers.
+//!
+//! ## Features
+//!
+//! - Interactive 2D OKLCH color picker
+//! - Color editor widgets either embedded or as popup window
+//! - Optional alpha channel editing
+//! - Multiple visualization modes:
+//!   - Stable Hue
+//!   - Stable Chroma
+//!   - Stable Lightness
+//! - Perceptually uniform editing using OKLCH
+//! - Hex/color text input
+//! - Native `egui` integration, including interoperability with wgui::Color32
+//!
+//! ## Main Types
+//!
+//! - [`Oklch`] — OKLCH color representation.
+//! - [`Oklab`] — OKLab color representation.
+//!
+//! ## Main Widgets
+//!
+//! - [`color_picker_oklch_2d`] — Embedded 2D color picker widget.
+//! - [`color_edit_button_oklch` / [`color_edit_button_oklcha`] — Color button that opens an OKLCH popup editor.
+//! - [`color_popup_oklch_simple`] / [`color_popup_oklcha_simple`] — Popup OKLCH editor for arbitrary egui elements.
+//! - [`color_popup_oklch_advanced`] / [`color_popup_oklcha_advanced`] — Same as above with explicit open/reset control.
+//!
+//! # Examples
+//!
+//! This crate ships with an interactive demonstration application showing the
+//! primary integration styles. The live demo is hosted at <https://www.timomillenaar.nl/oklch_color_picker>.
+//! The code for the examples is documented in the [`egui_oklab_demo`](../egui_oklab_demo/index.html) create.
+//!
+//! ## State
+//!
+//! Widget state is stored using `egui`'s temporary memory. Each picker should
+//! be given a unique `ui_identifier` when multiple pickers exist in the same UI
+//! so that their interaction state remains independent.
+//!
+//! ## Color Gamut
+//!
+//! The OKLCH color space can represent colors outside the sRGB gamut. When the
+//! selected color is not representable in sRGB, the picker computes and displays
+//! the nearest valid fallback color while preserving as much of the user's
+//! intent as possible.
+//!
+//! ## Modules
+//!
+//! - [`oklab`] — OKLab color types and conversions.
+//! - [`oklch`] — OKLCH color types and conversions.
+
 pub mod oklab;
 pub mod oklch;
 
@@ -67,6 +125,26 @@ enum OKLabPlotType {
     StableHue,
 }
 
+/// Displays a color button that opens an interactive OKLCH color picker.
+///
+/// The button shows the current color and, when clicked, opens a popup
+/// containing the full 2D OKLCH color picker with sliders and text input.
+///
+/// This variant edits only the color components (`L`, `C`, and `H`). The
+/// alpha channel is preserved but cannot be modified by the picker.
+///
+/// # Arguments
+///
+/// * `ui` - The `egui` UI to add the widget to.
+/// * `color` - The color to display and edit.
+/// * `widget_width` - Preferred width of the controls inside the popup.
+/// * `ui_identifier` - A unique identifier used to store persistent picker
+///   state in `egui`. Use a different identifier for each picker instance.
+///
+/// # Returns
+///
+/// Returns the widget's [`Response`]. The response is marked as changed when
+/// the user modifies the selected color.
 pub fn color_edit_button_oklch(
     ui: &mut Ui,
     color: &mut Oklch,
@@ -123,6 +201,23 @@ fn color_popup(
     changed
 }
 
+/// Displays a color button that opens an interactive OKLCHA color picker.
+///
+/// This behaves identically to [`color_edit_button_oklch`], but also exposes
+/// an alpha slider, allowing the opacity of the selected color to be edited.
+///
+/// # Arguments
+///
+/// * `ui` - The `egui` UI to add the widget to.
+/// * `color` - The color to display and edit.
+/// * `widget_width` - Preferred width of the controls inside the popup.
+/// * `ui_identifier` - A unique identifier used to store persistent picker
+///   state in `egui`.
+///
+/// # Returns
+///
+/// Returns the widget's [`Response`]. The response is marked as changed when
+/// the user modifies the selected color or its alpha channel.
 pub fn color_edit_button_oklcha(
     ui: &mut Ui,
     color: &mut Oklch,
@@ -146,6 +241,24 @@ pub fn color_edit_button_oklcha(
     response
 }
 
+/// Opens an OKLCH popup editor anchored to an existing widget.
+///
+/// The popup automatically opens when `response.clicked()` is true and resets
+/// its internal state each time it is opened.
+///
+/// This helper is suitable for the common case where the popup should simply
+/// appear when the associated widget is clicked.
+///
+/// # Arguments
+///
+/// * `response` - The response of the widget that owns the popup.
+/// * `color` - The color to edit.
+/// * `widget_width` - Preferred width of the picker controls.
+/// * `ui_identifier` - Unique identifier for the picker state.
+///
+/// # Returns
+///
+/// Returns `true` if the color was modified.
 pub fn color_popup_oklcha_simple(
     response: &Response,
     color: &mut Oklch,
@@ -162,6 +275,22 @@ pub fn color_popup_oklcha_simple(
     )
 }
 
+/// Opens an OKLCHA popup editor anchored to an existing widget.
+///
+/// This is the alpha-enabled version of [`color_popup_oklch_simple`]. The
+/// popup automatically opens when the associated widget is clicked and resets
+/// its internal state whenever it is reopened.
+///
+/// # Arguments
+///
+/// * `response` - The response of the widget that owns the popup.
+/// * `color` - The color to edit.
+/// * `widget_width` - Preferred width of the picker controls.
+/// * `ui_identifier` - Unique identifier for the picker state.
+///
+/// # Returns
+///
+/// Returns `true` if the color or alpha value was modified.
 pub fn color_popup_oklch_simple(
     response: &Response,
     color: &mut Oklch,
@@ -178,6 +307,27 @@ pub fn color_popup_oklch_simple(
     )
 }
 
+/// Displays an OKLCH popup editor with explicit control over its lifetime.
+///
+/// Unlike [`color_popup_oklch_simple`], this function allows callers to
+/// independently control whether the popup should be opened and whether its
+/// internal interaction state should be reset.
+///
+/// This is useful when the popup is driven by application state instead of a
+/// simple button click.
+///
+/// # Arguments
+///
+/// * `response` - The response of the widget that owns the popup.
+/// * `open` - Opens the popup when `true`.
+/// * `reset_state` - Resets the picker's cached interaction state when `true`.
+/// * `color` - The color to edit.
+/// * `widget_width` - Preferred width of the picker controls.
+/// * `ui_identifier` - Unique identifier for the picker state.
+///
+/// # Returns
+///
+/// Returns `true` if the selected color changed.
 pub fn color_popup_oklcha_advanced(
     response: &Response,
     open: bool,
@@ -207,6 +357,24 @@ pub fn color_popup_oklcha_advanced(
     changed
 }
 
+/// Displays an OKLCHA popup editor with explicit control over its lifetime.
+///
+/// This is the alpha-enabled version of
+/// [`color_popup_oklch_advanced`]. In addition to editing the OKLCH color
+/// components, it also allows the opacity to be modified.
+///
+/// # Arguments
+///
+/// * `response` - The response of the widget that owns the popup.
+/// * `open` - Opens the popup when `true`.
+/// * `reset_state` - Resets the picker's cached interaction state when `true`.
+/// * `color` - The color to edit.
+/// * `widget_width` - Preferred width of the picker controls.
+/// * `ui_identifier` - Unique identifier for the picker state.
+///
+/// # Returns
+///
+/// Returns `true` if the selected color or alpha value changed.
 pub fn color_popup_oklch_advanced(
     response: &Response,
     open: bool,
@@ -281,6 +449,17 @@ fn plot_type_selector(ui: &mut Ui, ui_identifier: impl std::hash::Hash) -> (bool
     (tab_changed, tab)
 }
 
+/// Displays the embedded OKLCH color picker panel.
+///
+/// This is the core implementation used by [`color_picker_oklch_2d`] and its
+/// popup variants. It renders the picker directly into the provided `Ui`
+/// without managing popup behavior or surrounding layout.
+///
+/// The selected color is edited in place through the provided [`Oklch`] value.
+/// A stable `ui_identifier` should be supplied for each independent picker
+/// instance to preserve its interaction state between frames.
+///
+/// Returns `true` if the selected color was modified during this frame.
 pub fn color_picker_panel_oklch_2d(
     ui: &mut Ui,
     plot_type: OKLabPlotType,
@@ -402,6 +581,38 @@ pub fn color_picker_panel_oklch_2d(
     (color_changed, new_color)
 }
 
+/// Displays the full embedded OKLCH color picker.
+///
+/// The picker combines:
+///
+/// - a 2D color selection viewport,
+/// - multiple projection modes,
+/// - OKLCH sliders,
+/// - optional alpha editing,
+/// - hexadecimal color input,
+/// - and a preview of the selected color.
+///
+/// Unlike the popup helpers, this function renders the picker directly into
+/// the current UI, making it suitable for settings panels, inspectors, and
+/// dedicated color editing windows.
+///
+/// Internal interaction state is cached using `egui`'s temporary memory.
+/// Supplying a stable and unique `ui_identifier` ensures multiple picker
+/// instances maintain independent state.
+///
+/// # Arguments
+///
+/// * `ui` - The `egui` UI to add the picker to.
+/// * `color` - The color being edited.
+/// * `widget_width` - Preferred width of the slider controls.
+/// * `with_alpha` - Whether to display an alpha slider.
+/// * `reset_state` - Whether to synchronize the cached picker state with
+///   `color` before rendering.
+/// * `ui_identifier` - Unique identifier used for caching picker state.
+///
+/// # Returns
+///
+/// Returns `true` if the user modified the selected color.
 pub fn color_picker_oklch_2d(
     ui: &mut Ui,
     color: &mut Oklch,

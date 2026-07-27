@@ -1,3 +1,27 @@
+//! # Embedded picker example
+//!
+//! This example demonstrates the simplest way to embed an OKLCH picker
+//! directly into an `egui` interface.
+//!
+//! The important pieces are:
+//!
+//! - storing an [`Oklch`] in your application state,
+//! - calling [`color_picker_oklch_2d`],
+//! - providing a stable `ui_identifier`,
+//! - choosing an appropriate widget width.
+//!
+//! ```text
+//! App State
+//!     │
+//!     ▼
+//! Oklch
+//!     │
+//!     ▼
+//! color_picker_oklch_2d(...)
+//! ```
+//!
+//! See `PickerDemo::ui()` below for the complete implementation.
+
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 

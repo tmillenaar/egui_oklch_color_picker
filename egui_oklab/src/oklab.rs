@@ -9,6 +9,9 @@ use crate::{Color32, Rgba};
 /// L is normally in `[0,1]`.
 /// Alpha is in `[0,1]`.
 /// A negative alpha signifies an additive color, matching `Hsva`.
+///
+/// To convert to an egui::Color32, use ```egui::Color32::from(oklab)```
+///
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Clone, Copy, Debug, Default, PartialOrd, PartialEq)]
 pub struct Oklab {
@@ -22,6 +25,8 @@ pub struct Oklab {
 }
 
 impl Oklab {
+    /// Creates a new OKLab color with the given lightness, chroma components, and
+    /// alpha value.
     #[inline]
     pub fn new(l: f32, a: f32, b: f32, alpha: f32) -> Self {
         Self { l, a, b, alpha }
@@ -32,15 +37,18 @@ impl Oklab {
     //------------------------------------------------------------------------
 
     #[inline]
+    /// Creates an `Oklab` color from an unmultiplied sRGBA color.
     pub fn from_srgba_unmultiplied([r, g, b, a]: [u8; 4]) -> Self {
         Self::from(Color32::from_rgba_unmultiplied(r, g, b, a))
     }
 
+    /// Creates an `Oklab` color from a premultiplied sRGBA color.
     #[inline]
     pub fn from_srgba_premultiplied([r, g, b, a]: [u8; 4]) -> Self {
         Self::from(Color32::from_rgba_premultiplied(r, g, b, a))
     }
 
+    /// Creates an opaque `Oklab` color from linear RGB components.
     #[inline]
     pub fn from_rgb(rgb: [f32; 3]) -> Self {
         let oklab = linear_srgb_to_oklab(LinearSrgb {
@@ -57,6 +65,7 @@ impl Oklab {
         }
     }
 
+    /// Creates an opaque `Oklab` color from gamma-encoded sRGB components.
     #[inline]
     pub fn from_srgb([r, g, b]: [u8; 3]) -> Self {
         Self::from_rgb([
@@ -66,6 +75,10 @@ impl Oklab {
         ])
     }
 
+    /// Creates an additive `Oklab` color from linear RGB components.
+    ///
+    /// The resulting color has a negative alpha value, matching the additive color
+    /// convention used by `egui`.
     #[inline]
     pub fn from_additive_rgb(rgb: [f32; 3]) -> Self {
         let mut out = Self::from_rgb(rgb);
@@ -73,6 +86,10 @@ impl Oklab {
         out
     }
 
+    /// Creates an additive `Oklab` color from gamma-encoded sRGB components.
+    ///
+    /// The resulting color has a negative alpha value, matching the additive color
+    /// convention used by `egui`.
     #[inline]
     pub fn from_additive_srgb([r, g, b]: [u8; 3]) -> Self {
         Self::from_additive_rgb([
@@ -82,6 +99,8 @@ impl Oklab {
         ])
     }
 
+
+    /// Creates an `Oklab` color from unmultiplied linear RGBA components.
     #[inline]
     pub fn from_rgba_unmultiplied(r: f32, g: f32, b: f32, alpha: f32) -> Self {
         let oklab = linear_srgb_to_oklab(LinearSrgb { r, g, b });
@@ -94,6 +113,10 @@ impl Oklab {
         }
     }
 
+    /// Creates an `Oklab` color from premultiplied linear RGBA components.
+    ///
+    /// If `alpha` is zero and the color channels are non-zero, the color is treated
+    /// as additive.
     #[inline]
     pub fn from_rgba_premultiplied(r: f32, g: f32, b: f32, alpha: f32) -> Self {
         if alpha <= 0.0 {
@@ -111,11 +134,17 @@ impl Oklab {
     // Conversion
     //------------------------------------------------------------------------
 
+    /// Returns a copy of this color with its alpha channel set to `1.0`.
     #[inline]
     pub fn to_opaque(self) -> Self {
         Self { alpha: 1.0, ..self }
     }
 
+    /// Converts this color to linear RGB.
+    ///
+    /// Colors outside the sRGB gamut are converted without clipping. Use
+    /// [`Oklab::is_valid_srgb`] to determine whether the result lies within the
+    /// displayable sRGB gamut.
     #[inline]
     pub fn to_rgb(self) -> [f32; 3] {
         let (is_valid, rgb) = oklab_to_linear_srgb(self);
@@ -125,6 +154,7 @@ impl Oklab {
         [rgb.r, rgb.g, rgb.b]
     }
 
+    /// Converts this color to gamma-encoded sRGB.
     #[inline]
     pub fn to_srgb(self) -> [u8; 3] {
         let [r, g, b] = self.to_rgb();
@@ -136,6 +166,7 @@ impl Oklab {
         ]
     }
 
+    /// Converts this color to unmultiplied linear RGBA.
     #[inline]
     pub fn to_rgba_unmultiplied(self) -> [f32; 4] {
         let [r, g, b] = self.to_rgb();
@@ -143,6 +174,10 @@ impl Oklab {
         [r, g, b, self.alpha]
     }
 
+
+    /// Converts this color to premultiplied linear RGBA.
+    ///
+    /// Additive colors are returned with an alpha value of `0.0`.
     #[inline]
     pub fn to_rgba_premultiplied(self) -> [f32; 4] {
         let [r, g, b, alpha] = self.to_rgba_unmultiplied();
@@ -154,6 +189,7 @@ impl Oklab {
         }
     }
 
+    /// Converts this color to unmultiplied sRGBA.
     #[inline]
     pub fn to_srgba_unmultiplied(self) -> [u8; 4] {
         let [r, g, b, alpha] = self.to_rgba_unmultiplied();
@@ -166,11 +202,13 @@ impl Oklab {
         ]
     }
 
+    /// Converts this color to premultiplied sRGBA.
     #[inline]
     pub fn to_srgba_premultiplied(self) -> [u8; 4] {
         Color32::from(self).to_array()
     }
 
+    /// Returns `true` if this color lies within the displayable sRGB gamut.
     #[inline]
     pub fn is_valid_srgb(&self) -> bool {
         let (is_valid, rgb) = oklab_to_linear_srgb(*self);

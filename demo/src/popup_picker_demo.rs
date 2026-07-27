@@ -1,3 +1,28 @@
+//! # Popup picker example
+//!
+//! This example demonstrates how to attach an OKLCH color picker popup to
+//! arbitrary widgets using
+//! [`egui_oklab::color_popup_oklch_advanced`] and
+//! [`egui_oklab::color_popup_oklcha_advanced`].
+//!
+//! Unlike the convenience button widgets, the popup APIs can be attached to
+//! any interactive element. In this example, clicking one of several colored
+//! rectangles opens a color picker anchored to that rectangle.
+//!
+//! The important parts of this example are:
+//!
+//! - Creating an interactive region with [`egui::Ui::interact`].
+//! - Passing the resulting [`egui::Response`] to one of the popup functions.
+//! - Providing a stable, unique identifier for each popup instance.
+//! - Using the alpha-enabled picker (`color_popup_oklcha_advanced`) for
+//!   translucent colors while using the simpler OKLCH picker for opaque ones.
+//!
+//! This approach is useful when your application already has custom controls,
+//! drawings, or other interactive elements and you want them to act as color
+//! pickers without replacing them with standard buttons.
+//!
+//! See [`PopupDemo::ui`] for the complete implementation.
+
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
