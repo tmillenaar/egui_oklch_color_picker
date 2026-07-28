@@ -1,7 +1,7 @@
-//! # egui_oklab Demo Gallery
+//! # egui_oklch_color_picker Demo Gallery
 //!
 //! Complete example applications demonstrating the widgets provided by
-//! `egui_oklab`.
+//! `egui_oklch_color_picker`.
 //!
 //! ## Examples
 //!

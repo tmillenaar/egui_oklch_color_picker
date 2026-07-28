@@ -1,7 +1,7 @@
-//! # egui_oklab Demo Gallery
+//! # egui_oklch_color_picker Demo Gallery
 //!
 //! This crate contains complete example applications demonstrating the
-//! widgets provided by `egui_oklab`.
+//! widgets provided by `egui_oklch_color_picker`.
 //!
 //! ## Examples
 //!
@@ -18,11 +18,8 @@ use serde::{Deserialize, Serialize};
 
 mod credits;
 use crate::credits::credit_footer;
-use egui_oklab_demo::{
-    button_picker_demo,
-    embedded_picker_demo,
-    picker_only_demo,
-    popup_picker_demo,
+use egui_oklch_color_picker_demo::{
+    button_picker_demo, embedded_picker_demo, picker_only_demo, popup_picker_demo,
 };
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -90,7 +87,7 @@ impl eframe::App for GalleryApp {
 
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.heading("egui-oklab");
+                ui.heading("Oklch color picker");
 
                 ui.separator();
 
@@ -171,7 +168,7 @@ impl eframe::App for GalleryApp {
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
-        "egui-oklab Demo Gallery",
+        "Oklch color picker Demo Gallery",
         eframe::NativeOptions::default(),
         Box::new(|cc| {
             Ok(Box::new(if let Some(storage) = cc.storage {

@@ -19,9 +19,9 @@ An OKLCH color picker for `egui`.
 ## Quick Example
 
 ```rust
-let mut color = egui_oklab::Oklch::default();
+let mut color = egui_oklch_color_picker::Oklch::default();
 let widget_width = 270.;
-egui_oklab::color_edit_button_oklch(
+egui_oklch_color_picker::color_edit_button_oklch(
     ui,
     &mut background_color,
     widget_width,

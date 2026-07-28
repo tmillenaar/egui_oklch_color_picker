@@ -2,8 +2,8 @@
 //!
 //! This example demonstrates how to attach an OKLCH color picker popup to
 //! arbitrary widgets using
-//! [`egui_oklab::color_popup_oklch_advanced`] and
-//! [`egui_oklab::color_popup_oklcha_advanced`].
+//! [`egui_oklch_color_picker::color_popup_oklch_advanced`] and
+//! [`egui_oklch_color_picker::color_popup_oklcha_advanced`].
 //!
 //! Unlike the convenience button widgets, the popup APIs can be attached to
 //! any interactive element. In this example, clicking one of several colored
@@ -26,7 +26,9 @@
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
-use egui_oklab::{color_popup_oklch_advanced, color_popup_oklcha_advanced, oklch::Oklch};
+use egui_oklch_color_picker::{
+    color_popup_oklch_advanced, color_popup_oklcha_advanced, oklch::Oklch,
+};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(default)]

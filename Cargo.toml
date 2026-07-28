@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "egui_oklab",
+    "egui_oklch_color_picker",
     "demo",
 ]
 

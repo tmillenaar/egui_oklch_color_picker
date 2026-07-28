@@ -25,7 +25,7 @@
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
-use egui_oklab::{color_picker_oklch_2d, oklch::Oklch};
+use egui_oklch_color_picker::{color_picker_oklch_2d, oklch::Oklch};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(default)]

@@ -1,4 +1,4 @@
-# egui-oklab Demo
+# Oklch color picker Demo
 
 This crate contains the demonstration application for **egui-oklch-color-picker**. It showcases the different ways the OKLCH color picker can be integrated into an `egui` application.
 
@@ -7,7 +7,7 @@ This crate contains the demonstration application for **egui-oklch-color-picker*
 From the workspace root:
 
 ```bash
-cargo run -p egui_oklab_demo --release
+cargo run -p egui_oklch_color_picker_demo --release
 ```
 
 This can also be ran locally in your browser. For this, first install trunk:

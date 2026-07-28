@@ -16,7 +16,7 @@
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 
-use egui_oklab::{color_edit_button_oklch, color_edit_button_oklcha, oklch::Oklch};
+use egui_oklch_color_picker::{color_edit_button_oklch, color_edit_button_oklcha, oklch::Oklch};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(default)]

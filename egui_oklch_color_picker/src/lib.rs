@@ -36,7 +36,7 @@
 //!
 //! This crate ships with an interactive demonstration application showing the
 //! primary integration styles. The live demo is hosted at <https://www.timomillenaar.nl/oklch_color_picker>.
-//! The code for the examples is documented in the [`egui_oklab_demo`](../egui_oklab_demo/index.html) create.
+//! The code for the examples is documented in the [`egui_oklch_color_picker_demo`](../egui_oklch_color_picker_demo/index.html) create.
 //!
 //! ## State
 //!
@@ -83,9 +83,8 @@ use std::f32::consts::TAU;
 
 use egui::*;
 use epaint::{
-    StrokeKind,
     ecolor::{Color32, Rgba},
-    vec2,
+    vec2, StrokeKind,
 };
 
 fn color_button(ui: &mut Ui, oklch: Oklch, open: bool) -> Response {
