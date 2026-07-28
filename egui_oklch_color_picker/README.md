@@ -29,7 +29,7 @@ egui_oklch_color_picker::color_edit_button_oklch(
 );
 ```
 
-For more complete examples, see the `demo` crate included in this repository.
+For more complete examples, see the `demo` crate included in this repository (https://github.com/tmillenaar/egui_oklch_color_picker/tree/main/demo)
 
 ## License
 
