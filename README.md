@@ -6,7 +6,7 @@ An OKLCH color picker library for `egui`.
 
 The live demo can be accessed here: [timomillenaar.nl/oklch_color_picker](https://www.timomillenaar.nl/oklch_color_picker/)
 
-The documentation can be found at docs.rs
+The documentation can be found at [docs.rs](https://docs.rs/egui_oklch_color_picker/latest/egui_oklch_color_picker/)
 
 ![image](egui_oklch_color_picker/stable_chroma.png)
 

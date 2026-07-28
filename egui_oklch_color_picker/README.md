@@ -4,6 +4,10 @@ An OKLCH color picker for `egui`.
 
 `egui_oklch_color_picker` provides interactive color picker widgets based on the perceptually uniform **OKLCH** color spaces. It includes embedded pickers, popup pickers, and color edit buttons, along with conversion types for working with OKLab and OKLCH colors.
 
+The live demo can be accessed here: [timomillenaar.nl/oklch_color_picker](https://www.timomillenaar.nl/oklch_color_picker/)
+
+The documentation can be found at [docs.rs](https://docs.rs/egui_oklch_color_picker/latest/egui_oklch_color_picker/)
+
 ![image](stable_chroma.png)
 
 ## Features
