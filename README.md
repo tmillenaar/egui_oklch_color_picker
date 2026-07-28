@@ -8,7 +8,7 @@ The live demo can be accessed here: [timomillenaar.nl/oklch_color_picker](https:
 
 The documentation can be found at docs.rs
 
-![image](stable_chroma.png)
+![image](egui_oklch_color_picker/stable_chroma.png)
 
 ## Features
 
