@@ -56,6 +56,13 @@ cd demo
 trunk serve --release
 ```
 
+
+## Credit where it is due
+
+The design of the primary color picker was inspired by the youtube video
+[A Better Way To Color Pick](https://www.youtube.com/watch?v=fSnltHozDcU).
+Their Krita plugin implementation can be found on their [github](https://github.com/gibapiu/oklab_colour_picker_krita).
+
 ## License
 
 This software is freely available under an MIT license
