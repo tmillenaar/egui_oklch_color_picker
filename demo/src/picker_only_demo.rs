@@ -43,12 +43,25 @@ impl Default for PickerDemo {
 
 impl PickerDemo {
     pub fn ui(&mut self, ui: &mut egui::Ui, content_rect: egui::Rect) {
-        let picker_width = (ui.available_width() * 0.28).clamp(180.0, 380.0);
+        let picker_width = (ui.available_width() * 0.6).clamp(180.0, 540.0);
         let panel_width = picker_width + 80.0;
-        let centered_rect =
-            egui::Rect::from_center_size(content_rect.center(), egui::vec2(panel_width, 800.));
+        let picker_height = picker_width*2.5;
 
-        ui.scope_builder(egui::UiBuilder::new().max_rect(centered_rect), |ui| {
+        // Center rect if there is a lot of space on the screen, place at top if not.
+        // We do this fallback because centering when there is little space causes the top of
+        // the panel to be outside the top of the page.
+        let top = if content_rect.height() > picker_height {
+            content_rect.center().y - picker_height / 2.0
+        } else {
+            content_rect.top()
+        };
+
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(content_rect.center().x - panel_width / 2.0, content_rect.top()),
+            egui::vec2(panel_width, picker_height),
+        );
+
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
             color_picker_oklch_2d(
                 ui,
                 &mut self.color,

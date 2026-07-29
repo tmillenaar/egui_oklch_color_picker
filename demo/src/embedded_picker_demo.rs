@@ -45,14 +45,41 @@ impl Default for EmbeddedDemo {
 
 impl EmbeddedDemo {
     pub fn ui(&mut self, ui: &mut egui::Ui, content_rect: egui::Rect) {
-        let picker_width = (ui.available_width() * 0.28).clamp(180.0, 380.0);
-        let panel_width = picker_width + 80.0;
-        const HEADER_HEIGHT: f32 = 48.0;
 
-        // Header
+        let picker_width = ((content_rect.width() - 60.0) / 2.0).clamp(180.0, 320.0);
+
+        const HEADER_HEIGHT: f32 = 48.0;
+        const PREVIEW_HEIGHT: f32 = 240.0;
+
         let header_rect = egui::Rect::from_min_max(
             content_rect.left_top(),
             egui::pos2(content_rect.right(), content_rect.top() + HEADER_HEIGHT),
+        );
+
+        let preview_rect = egui::Rect::from_min_max(
+            egui::pos2(content_rect.left(), header_rect.bottom()),
+            egui::pos2(content_rect.right(), header_rect.bottom() + PREVIEW_HEIGHT),
+        );
+
+        let pickers_rect = egui::Rect::from_min_max(
+            egui::pos2(content_rect.left(), preview_rect.bottom()),
+            content_rect.right_bottom(),
+        );
+
+        let left_rect = egui::Rect::from_min_max(
+            pickers_rect.left_top(),
+            egui::pos2(
+                pickers_rect.center().x - 10.0,
+                pickers_rect.bottom(),
+            ),
+        );
+
+        let right_rect = egui::Rect::from_min_max(
+            egui::pos2(
+                pickers_rect.center().x + 10.0,
+                pickers_rect.top(),
+            ),
+            pickers_rect.right_bottom(),
         );
 
         ui.scope_builder(egui::UiBuilder::new().max_rect(header_rect), |ui| {
@@ -69,26 +96,53 @@ impl EmbeddedDemo {
             });
         });
 
-        // Remaining content
-        let content = egui::Rect::from_min_max(
-            egui::pos2(content_rect.left(), header_rect.bottom()),
-            content_rect.right_bottom(),
-        );
+        ui.scope_builder(egui::UiBuilder::new().max_rect(preview_rect), |ui| {
+            let rect = ui.max_rect();
+            let painter = ui.painter();
 
-        let left_rect = egui::Rect::from_min_max(
-            content.left_top(),
-            egui::pos2(content.left() + panel_width, content.bottom()),
-        );
+            painter.rect_filled(rect, 0.0, ui.visuals().panel_fill);
 
-        let right_rect = egui::Rect::from_min_max(
-            egui::pos2(content.right() - panel_width, content.top()),
-            content.right_bottom(),
-        );
+            let center = rect.center();
 
-        let center_rect = egui::Rect::from_min_max(
-            egui::pos2(left_rect.right(), content.top()),
-            egui::pos2(right_rect.left(), content.bottom()),
-        );
+            let radius = (rect.height() * 0.30).clamp(40.0, 90.0);
+            let offset = radius * 0.46;
+
+            painter.circle_filled(
+                center + egui::vec2(-offset, 0.0),
+                radius,
+                self.left,
+            );
+
+            painter.circle_filled(
+                center + egui::vec2(offset, 0.0),
+                radius,
+                self.right,
+            );
+        });
+
+        ui.scope_builder(egui::UiBuilder::new().max_rect(preview_rect), |ui| {
+            let rect = ui.max_rect();
+            let painter = ui.painter();
+
+            painter.rect_filled(rect, 0.0, ui.visuals().panel_fill);
+
+            let center = rect.center();
+
+            let radius = (rect.height() * 0.30).clamp(40.0, 90.0);
+            let offset = radius * 0.46;
+
+            painter.circle_filled(
+                center + egui::vec2(-offset, 0.0),
+                radius,
+                self.left,
+            );
+
+            painter.circle_filled(
+                center + egui::vec2(offset, 0.0),
+                radius,
+                self.right,
+            );
+        });
 
         // Left picker
         ui.scope_builder(egui::UiBuilder::new().max_rect(left_rect), |ui| {
@@ -118,23 +172,23 @@ impl EmbeddedDemo {
             );
         });
 
-        // Center preview
-        ui.scope_builder(egui::UiBuilder::new().max_rect(center_rect), |ui| {
-            let rect = ui.max_rect();
-            let painter = ui.painter();
+        // // Center preview
+        // ui.scope_builder(egui::UiBuilder::new().max_rect(center_rect), |ui| {
+        //     let rect = ui.max_rect();
+        //     let painter = ui.painter();
 
-            painter.rect_filled(rect, 0.0, ui.visuals().panel_fill);
+        //     painter.rect_filled(rect, 0.0, ui.visuals().panel_fill);
 
-            let center = rect.center();
+        //     let center = rect.center();
 
-            let size = rect.size().min_elem();
+        //     let size = rect.size().min_elem();
 
-            let radius = (size * 0.28).clamp(40.0, 120.0);
-            let offset = radius * 0.46;
+        //     let radius = (size * 0.28).clamp(40.0, 120.0);
+        //     let offset = radius * 0.46;
 
-            painter.circle_filled(center + egui::vec2(-offset, 0.0), radius, self.left);
+        //     painter.circle_filled(center + egui::vec2(-offset, 0.0), radius, self.left);
 
-            painter.circle_filled(center + egui::vec2(offset, 0.0), radius, self.right);
-        });
+        //     painter.circle_filled(center + egui::vec2(offset, 0.0), radius, self.right);
+        // });
     }
 }
