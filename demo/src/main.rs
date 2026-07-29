@@ -73,6 +73,56 @@ impl GalleryApp {
     }
 }
 
+impl GalleryApp {
+    fn demo_selector(&mut self, ui: &mut egui::Ui) {
+        if ui
+            .selectable_label(self.current == DemoKind::Picker, "Picker only")
+            .clicked()
+        {
+            self.switch_demo(DemoKind::Picker);
+        }
+
+        if ui
+            .selectable_label(self.current == DemoKind::Embedded, "Embedded Picker")
+            .clicked()
+        {
+            self.switch_demo(DemoKind::Embedded);
+        }
+
+        if ui
+            .selectable_label(self.current == DemoKind::Popup, "Popup Picker")
+            .clicked()
+        {
+            self.switch_demo(DemoKind::Popup);
+        }
+
+        if ui
+            .selectable_label(self.current == DemoKind::Button, "Button Picker")
+            .clicked()
+        {
+            self.switch_demo(DemoKind::Button);
+        }
+    }
+    fn bottom_buttons(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let theme = if self.dark_mode {
+            "☀ Flash me baby!"
+        } else {
+            "🌙 Dark Theme"
+        };
+
+        if ui.button(theme).clicked() {
+            self.dark_mode = !self.dark_mode;
+        }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if ui.button("Quit").clicked() {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+    }
+}
+
 impl eframe::App for GalleryApp {
     fn save(&mut self, storage: &mut dyn eframe::Storage) {
         eframe::set_value(storage, eframe::APP_KEY, self);
@@ -86,60 +136,33 @@ impl eframe::App for GalleryApp {
         });
 
         egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("Oklch color picker");
+            let narrow = ui.available_width() < 750.0;
 
-                ui.separator();
+               if narrow {
+                   ui.vertical(|ui| {
+                       ui.heading("Oklch color picker");
 
-                if ui
-                    .selectable_label(self.current == DemoKind::Picker, "Picker only")
-                    .clicked()
-                {
-                    self.switch_demo(DemoKind::Picker);
-                }
+                       ui.separator();
 
-                if ui
-                    .selectable_label(self.current == DemoKind::Embedded, "Embedded Picker")
-                    .clicked()
-                {
-                    self.switch_demo(DemoKind::Embedded);
-                }
+                       self.demo_selector(ui);
 
-                if ui
-                    .selectable_label(self.current == DemoKind::Popup, "Popup Picker")
-                    .clicked()
-                {
-                    self.switch_demo(DemoKind::Popup);
-                }
+                       ui.separator();
 
-                if ui
-                    .selectable_label(self.current == DemoKind::Button, "Button Picker")
-                    .clicked()
-                {
-                    self.switch_demo(DemoKind::Button);
-                }
+                       self.bottom_buttons(ui, ctx);
+                   });
+               } else {
+                   ui.horizontal(|ui| {
+                       ui.heading("Oklch color picker");
 
-                ui.separator();
+                       ui.separator();
 
-                let theme = if self.dark_mode {
-                    "☀ Flash me baby!"
-                } else {
-                    "🌙 Dark Theme"
-                };
+                       self.demo_selector(ui);
 
-                if ui.button(theme).clicked() {
-                    self.dark_mode = !self.dark_mode;
-                }
+                       ui.separator();
 
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Quit").clicked() {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                        }
-                    });
-                }
-            });
+                       self.bottom_buttons(ui, ctx);
+                   });
+               }
         });
 
         // Note: show bottom panel before central panel, otherwise the central panel does not know it's size.
