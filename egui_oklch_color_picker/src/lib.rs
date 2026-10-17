@@ -151,7 +151,7 @@ pub fn color_edit_button_oklch(
     ui: &mut Ui,
     color: &mut Oklch,
     widget_width: f32,
-    ui_identifier: impl std::hash::Hash,
+    ui_identifier: impl egui::AsIdSalt,
 ) -> Response {
     let mut response = color_button(
         ui,
@@ -175,7 +175,7 @@ fn color_popup(
     color: &mut Oklch,
     widget_width: f32,
     with_alpha: bool,
-    ui_identifier: impl std::hash::Hash,
+    ui_identifier: impl egui::AsIdSalt,
 ) -> bool {
     let popup_id = response.id.with("popup");
 
@@ -224,7 +224,7 @@ pub fn color_edit_button_oklcha(
     ui: &mut Ui,
     color: &mut Oklch,
     widget_width: f32,
-    ui_identifier: impl std::hash::Hash,
+    ui_identifier: impl egui::AsIdSalt,
 ) -> Response {
     let mut response = color_button(
         ui,
@@ -265,7 +265,7 @@ pub fn color_popup_oklcha_simple(
     response: &Response,
     color: &mut Oklch,
     widget_width: f32,
-    ui_identifier: impl std::hash::Hash,
+    ui_identifier: impl egui::AsIdSalt,
 ) -> bool {
     color_popup_oklcha_advanced(
         response,
@@ -297,7 +297,7 @@ pub fn color_popup_oklch_simple(
     response: &Response,
     color: &mut Oklch,
     widget_width: f32,
-    ui_identifier: impl std::hash::Hash,
+    ui_identifier: impl egui::AsIdSalt,
 ) -> bool {
     color_popup_oklch_advanced(
         response,
@@ -336,7 +336,7 @@ pub fn color_popup_oklcha_advanced(
     reset_state: bool,
     color: &mut Oklch,
     widget_width: f32,
-    ui_identifier: impl std::hash::Hash,
+    ui_identifier: impl egui::AsIdSalt,
 ) -> bool {
     let mut changed = false;
 
@@ -383,7 +383,7 @@ pub fn color_popup_oklch_advanced(
     reset_state: bool,
     color: &mut Oklch,
     widget_width: f32,
-    ui_identifier: impl std::hash::Hash,
+    ui_identifier: impl egui::AsIdSalt,
 ) -> bool {
     let popup_id = response.id.with("popup");
 
@@ -408,7 +408,7 @@ pub fn color_popup_oklch_advanced(
     changed
 }
 
-fn plot_type_selector(ui: &mut Ui, ui_identifier: impl std::hash::Hash) -> (bool, OKLabPlotType) {
+fn plot_type_selector(ui: &mut Ui, ui_identifier: impl egui::AsIdSalt) -> (bool, OKLabPlotType) {
     let mut tab_changed = false;
 
     let tab_id = ui.id().with(("plot_type", ui_identifier));
@@ -621,7 +621,7 @@ pub fn color_picker_oklch_2d(
     widget_width: f32,
     with_alpha: bool,
     reset_state: bool,
-    ui_identifier: impl std::hash::Hash,
+    ui_identifier: impl egui::AsIdSalt,
 ) -> bool {
     let ui_identifier = ui.id().with(ui_identifier);
 

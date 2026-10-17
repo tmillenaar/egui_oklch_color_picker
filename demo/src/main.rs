@@ -103,7 +103,7 @@ impl GalleryApp {
             self.switch_demo(DemoKind::Button);
         }
     }
-    fn bottom_buttons(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+    fn bottom_buttons(&mut self, ui: &mut egui::Ui) {
         let theme = if self.dark_mode {
             "☀ Flash me baby!"
         } else {
@@ -117,7 +117,7 @@ impl GalleryApp {
         #[cfg(not(target_arch = "wasm32"))]
         {
             if ui.button("Quit").clicked() {
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
     }
@@ -128,54 +128,54 @@ impl eframe::App for GalleryApp {
         eframe::set_value(storage, eframe::APP_KEY, self);
     }
 
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        ctx.set_visuals(if self.dark_mode {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        ui.ctx().set_visuals(if self.dark_mode {
             egui::Visuals::dark()
         } else {
             egui::Visuals::light()
         });
 
-        egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
+        egui::Panel::top("top_bar").show(ui, |ui| {
             let narrow = ui.available_width() < 750.0;
 
-               if narrow {
-                   ui.vertical(|ui| {
-                       ui.heading("Oklch color picker");
+            if narrow {
+                ui.vertical(|ui| {
+                    ui.heading("Oklch color picker");
 
-                       ui.separator();
+                    ui.separator();
 
-                       self.demo_selector(ui);
+                    self.demo_selector(ui);
 
-                       ui.separator();
+                    ui.separator();
 
-                       self.bottom_buttons(ui, ctx);
-                   });
-               } else {
-                   ui.horizontal(|ui| {
-                       ui.heading("Oklch color picker");
+                    self.bottom_buttons(ui);
+                });
+            } else {
+                ui.horizontal(|ui| {
+                    ui.heading("Oklch color picker");
 
-                       ui.separator();
+                    ui.separator();
 
-                       self.demo_selector(ui);
+                    self.demo_selector(ui);
 
-                       ui.separator();
+                    ui.separator();
 
-                       self.bottom_buttons(ui, ctx);
-                   });
-               }
+                    self.bottom_buttons(ui);
+                });
+            }
         });
 
         // Note: show bottom panel before central panel, otherwise the central panel does not know it's size.
         //       This is because we render the bottom panel from bottom to top.
         // Note: only show the credits panel on local build since the web version has the credits in the html
         #[cfg(not(target_arch = "wasm32"))]
-        egui::TopBottomPanel::bottom("credits")
+        egui::Panel::bottom("credits")
             .resizable(false)
-            .show(ctx, |ui| {
+            .show(ui, |ui| {
                 credit_footer(ui);
             });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let content_rect = ui.max_rect();
 
             match self.current {

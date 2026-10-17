@@ -239,7 +239,7 @@ where
         }
 
         // Zoom
-        let scroll = response.ctx.input(|i| i.raw_scroll_delta.y);
+        let scroll = response.ctx.input(|i| i.smooth_scroll_delta().y);
 
         if scroll.abs() > 0.0 {
             if let Some(mouse) = response.hover_pos() {

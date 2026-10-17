@@ -86,7 +86,7 @@ impl<'a> OklchEdit<'a> {
         ui: &mut Ui,
         label: &str,
         index: usize,
-        ui_identifier: impl std::hash::Hash,
+        ui_identifier: impl egui::AsIdSalt,
     ) -> bool {
         let id = ui.id().with(("Oklch", label, ui_identifier));
 

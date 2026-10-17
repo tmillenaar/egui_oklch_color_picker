@@ -91,7 +91,7 @@ impl<'a> HsvEdit<'a> {
         ui: &mut Ui,
         label: &str,
         index: usize,
-        ui_identifier: impl std::hash::Hash,
+        ui_identifier: impl egui::AsIdSalt,
     ) -> bool {
         let id = ui.id().with(("HSV", label, ui_identifier));
 

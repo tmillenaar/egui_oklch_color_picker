@@ -9,7 +9,7 @@ pub fn color_slider_2d<T, P>(
     ui: &mut Ui,
     coord: &mut T::Coord,
     projection: P,
-    ui_identifiable_label: impl std::hash::Hash,
+    ui_identifiable_label: impl egui::AsIdSalt,
 ) -> (Response, bool)
 where
     T: CoordinateTransform + Send + Sync + 'static,
@@ -143,7 +143,9 @@ where
     //        prevent the user from accidentally selecting colors when panning/zooming
     let is_multitouch = response.ctx.input(|i| i.multi_touch().is_some());
     if !is_multitouch
-        && response.ctx.input(|i| i.pointer.button_down(PointerButton::Primary))
+        && response
+            .ctx
+            .input(|i| i.pointer.button_down(PointerButton::Primary))
     {
         ui.ctx().set_cursor_icon(egui::CursorIcon::None);
     }

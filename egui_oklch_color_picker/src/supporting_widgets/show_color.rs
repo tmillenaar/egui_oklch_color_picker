@@ -41,7 +41,7 @@ pub fn show_srgba_unmultiplied(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
                 text,
-                egui::TextStyle::Button.resolve(&painter.ctx().style()),
+                egui::TextStyle::Button.resolve(&ui.style()),
                 contrast_color(Color32::from_rgb(srgba[0], srgba[1], srgba[2])),
             );
         }

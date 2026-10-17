@@ -79,7 +79,7 @@ impl<'a> OklabEdit<'a> {
         ui: &mut Ui,
         label: &str,
         index: usize,
-        ui_identifier: impl std::hash::Hash,
+        ui_identifier: impl egui::AsIdSalt,
     ) -> bool {
         let id = ui.id().with(("Oklab", label, ui_identifier));
 
