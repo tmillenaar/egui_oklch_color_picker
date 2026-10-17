@@ -20,7 +20,7 @@ pub fn color_slider_1d_grid(
     color_at: impl Fn(f32) -> Oklch,
     background_color_at: Option<impl Fn(f32) -> Color32>,
     axis_name: &str,
-    ui_identifier: impl std::hash::Hash,
+    ui_identifier: impl egui::AsIdSalt,
 ) -> Response {
     let desired_size = vec2(ui.spacing().slider_width, ui.spacing().interact_size.y);
     let (rect, response) = ui.allocate_at_least(desired_size, Sense::click_and_drag());

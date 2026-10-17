@@ -18,7 +18,7 @@ pub fn editable_text_field(
     prefix: &str,
     value: String,
     width: f32,
-) -> (Response, NumericEdit) {
+) -> (AtomLayoutResponse, NumericEdit) {
     let mut state = ui
         .data(|d| d.get_temp::<NumericFieldState>(id))
         .unwrap_or_else(|| NumericFieldState {

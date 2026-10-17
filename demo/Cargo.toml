@@ -3,9 +3,11 @@ name = "egui_oklch_color_picker_demo"
 edition = "2024"
 
 [dependencies]
-egui_oklch_color_picker = { path = "../egui_oklch_color_picker", features = ["serde"] }
+egui_oklch_color_picker = { path = "../egui_oklch_color_picker", features = [
+    "serde",
+] }
 
-eframe = { version = "0.33", features = ["persistence"] }
+eframe = { version = "0.36", features = ["persistence"] }
 serde = { version = "1", features = ["derive"] }
 log = "0.4.33"
 

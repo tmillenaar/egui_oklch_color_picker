@@ -9,6 +9,6 @@ readme = "README.md"
 description = "`egui_oklch_color_picker` provides interactive color picker widgets for `egui` based on the perceptually uniform **OKLCH** color spaces. It includes embedded pickers, popup pickers, and color edit buttons, along with conversion types for working with OKLab and OKLCH colors."
 
 [dependencies]
-egui = "0.33"
+egui = "0.36"
 fast-math = "0.1"
 serde = { version = "1", optional = true, features = ["derive"] }
